@@ -1,5 +1,7 @@
 # Little Birds for Bedrock
 
+[![checks](https://github.com/gabmaybelle/little-birds-bedrock/actions/workflows/checks.yml/badge.svg)](https://github.com/gabmaybelle/little-birds-bedrock/actions/workflows/checks.yml)
+
 Make your cottage cozier with a bird or two. Little pet birds that make a perch their own and are
 glad when you come home.
 
