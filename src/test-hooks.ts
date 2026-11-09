@@ -3,17 +3,24 @@
 // does anything a player could notice in a world without the self-test:
 //
 //   little_birds:debug own <bird id> <owner id>          record a bird's owner
-//   little_birds:debug stand_in <owner id> <x> <y> <z>   an owner "standing" there (overworld)
+//   little_birds:debug stand_in <owner id> <x> <y> <z> [yaw] [dimension]
+//                                                        an owner "standing" there (overworld unless named)
 //   little_birds:debug stand_in <owner id> none          that owner gone (offline)
 //   little_birds:debug perch_added <x> <y> <z>           a perch placed by command (overworld)
 //   little_birds:debug use <owner id> <x> <y> <z> [sneak] [face]
 //                                                        that owner uses the block with an empty hand
+//   little_birds:debug bird_use <owner id> <bird id> [plain]
+//                                                        that owner sneak-uses the bird with an empty hand (plain: no sneak)
+//   little_birds:debug owner_travelled <owner id>        that owner changed worlds (move the stand-in first)
+//   little_birds:debug owner_gone <owner id>             that owner died or left
 //   little_birds:debug state <bird id>                   replies with what this pack knows of the bird
 //   little_birds:debug perf                              replies with what the perch's loops cost (ms)
 //
 // Replies come back as /scriptevent little_birds:debug_reply <json>.
 import { world, system, Direction } from "@minecraft/server";
 import { NS, addPerch, blockUse, debugState, ownerIdOf, perchList, perf, standIns } from "./perch.js";
+import { birdUseAction, debugShoulder, ownerGone, ownerTravelled, shoulderPerf } from "./shoulder.js";
+import { debugGreeting, greetingPerf } from "./greeting.js";
 
 const reply = (o: object) => system.sendScriptEvent(`${NS}:debug_reply`, JSON.stringify(o));
 const overworld = () => world.getDimension("minecraft:overworld");
@@ -24,7 +31,7 @@ function run(message: string) {
     world.getEntity(a[0])?.setDynamicProperty(`${NS}:owner`, a[1]);
   } else if (cmd === "stand_in") {
     if (a[1] === "none") standIns.delete(a[0]);
-    else standIns.set(a[0], { dimensionId: "minecraft:overworld", location: { x: +a[1], y: +a[2], z: +a[3] } });
+    else standIns.set(a[0], { dimensionId: a[5] ?? "minecraft:overworld", location: { x: +a[1], y: +a[2], z: +a[3] }, yaw: a[4] === undefined ? 0 : +a[4] });
   } else if (cmd === "perch_added") {
     addPerch(overworld(), { x: +a[0], y: +a[1], z: +a[2] });
   } else if (cmd === "use") {
@@ -36,8 +43,22 @@ function run(message: string) {
     const act = block && blockUse({ id: ownerId, dimension: overworld(), location: at, sneaking: sneak, emptyHand: true }, block, face);
     if (act) act();
     reply({ cmd: "use", acted: !!act });
+  } else if (cmd === "bird_use") {
+    const [ownerId, birdId] = a;
+    const bird = world.getEntity(birdId);
+    const s = standIns.get(ownerId);
+    const dimension = s ? world.getDimension(s.dimensionId) : overworld();
+    const act = bird && birdUseAction({ id: ownerId, dimension, location: s?.location ?? bird.location, sneaking: !a.includes("plain"), emptyHand: true }, bird);
+    if (act) act();
+    reply({ cmd: "bird_use", acted: !!act });
+  } else if (cmd === "owner_travelled") {
+    ownerTravelled(a[0]);
+    reply({ cmd: "owner_travelled" });
+  } else if (cmd === "owner_gone") {
+    ownerGone(a[0]);
+    reply({ cmd: "owner_gone" });
   } else if (cmd === "perf") {
-    reply({ cmd: "perf", ...JSON.parse(JSON.stringify(perf)) });
+    reply({ cmd: "perf", ...JSON.parse(JSON.stringify(perf)), shoulder: { ...shoulderPerf }, greeting: { ...greetingPerf } });
   } else if (cmd === "state") {
     const bird = world.getEntity(a[0]);
     reply({
@@ -48,6 +69,10 @@ function run(message: string) {
       perch: bird?.getDynamicProperty(`${NS}:perch`) ?? null,
       owner: bird ? ownerIdOf(bird) ?? null : null,
       active: debugState(a[0]),
+      shoulder: debugShoulder(a[0]),
+      greetingPose: bird?.isValid ? bird.getProperty(`${NS}:greeting`) === true : false,
+      ...(bird?.isValid ? debugGreeting(bird) : {}),
+      dimension: bird?.isValid ? bird.dimension.id : null,
       perches: perchList().length,
     });
   }

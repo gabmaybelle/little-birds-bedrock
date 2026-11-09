@@ -32,7 +32,14 @@ function properties(bird) {
 	return p;
 }
 
+/** The bird's collision box on a shoulder; src/shoulder-logic.ts has the same number and says why. */
+const SHOULDER_BOX = 0.1;
+
 function entity(bird) {
+	// What it shrugs off, in every body but the shoulder's.
+	const body = {
+		'minecraft:damage_sensor': { triggers: { cause: 'fall', deals_damage: 'no' } },
+	};
 	return {
 		format_version: '1.26.0',
 		'minecraft:entity': {
@@ -50,9 +57,14 @@ function entity(bird) {
 				'minecraft:behavior.look_at_player': { priority: 2, look_distance: 8, look_time: { min: 1, max: 2 } },
 				'minecraft:breathable': { suffocate_time: 0, total_supply: 15 },
 				'minecraft:can_fly': {},
+				// The one exception to the rule above. The bird's size is here, so a new bird has it
+				// from the start and no group sets it as it appears: with a group setting the size on
+				// spawning, new wild flocks often stood still (the fly check on Preview 1.26.70: a
+				// flock stuck in 7 of 10 runs, against none in 5 with the size here only). The
+				// shoulder body shrinks it, and every event that takes the shoulder body off adds
+				// own_size, which sets it back, so it is never lost.
 				'minecraft:collision_box': { width: bird.width, height: bird.height },
 				'minecraft:conditional_bandwidth_optimization': {},
-				'minecraft:damage_sensor': { triggers: { cause: 'fall', deals_damage: 'no' } },
 				'minecraft:experience_reward': { on_death: 'query.last_hit_by_player ? Math.Random(1,3) : 0' },
 				'minecraft:game_event_movement_tracking': { emit_flap: true },
 				'minecraft:health': { max: bird.health, value: bird.health },
@@ -84,8 +96,10 @@ function entity(bird) {
 					'minecraft:behavior.follow_owner': { priority: 3, speed_multiplier: 1, start_distance: 5, stop_distance: 1 },
 				},
 				// A bird free to move: walks and flies about, can be pushed, chatters. The perch script
-				// swaps it for held_body (flying home, or awake on the perch) or asleep_body.
+				// swaps it for held_body (flying home, or awake on the perch) or asleep_body, and the
+				// shoulder script for shoulder_body.
 				[`${NS}:free_body`]: {
+					...body,
 					'minecraft:movement': { value: 0.4 },
 					'minecraft:pushable': { is_pushable: true, is_pushable_by_piston: true },
 					'minecraft:behavior.random_fly': { priority: 4, avoid_damage_blocks: true, can_land_on_trees: true, y_offset: 0, speed_multiplier: 1, xz_dist: 15, y_dist: 1 },
@@ -94,14 +108,33 @@ function entity(bird) {
 				// Moved by the script alone (flying home to its perch, sitting on it by day): no
 				// movement of its own, no pushing, no goals; it still chatters, as on Java.
 				[`${NS}:held_body`]: {
+					...body,
 					'minecraft:movement': { value: 0 },
 					'minecraft:pushable': { is_pushable: false, is_pushable_by_piston: false },
 					'minecraft:ambient_sound_interval': { event_name: 'ambient', value: 4, range: 4 },
 				},
 				// Asleep on its perch for the night: held the same way, and quiet until morning.
 				[`${NS}:asleep_body`]: {
+					...body,
 					'minecraft:movement': { value: 0 },
 					'minecraft:pushable': { is_pushable: false, is_pushable_by_piston: false },
+				},
+				// On its owner's shoulder (src/shoulder.ts): moved by the script alone, like the held
+				// body, still chattering. Bedrock pushes a player out of any box that overlaps theirs,
+				// so its collision box shrinks to SHOULDER_BOX (it clears the player at every angle);
+				// the hit box keeps the bird's own size, so it is as easy to sneak-use off as on. It
+				// can't suffocate in a wall beside its owner (Java's shoulder bird has no physics).
+				[`${NS}:shoulder_body`]: {
+					'minecraft:collision_box': { width: SHOULDER_BOX, height: SHOULDER_BOX },
+					'minecraft:custom_hit_test': { hitboxes: [{ pivot: [0, bird.height / 2, 0], width: bird.width, height: bird.height }] },
+					'minecraft:damage_sensor': { triggers: [{ cause: 'fall', deals_damage: 'no' }, { cause: 'suffocation', deals_damage: 'no' }] },
+					'minecraft:movement': { value: 0 },
+					'minecraft:pushable': { is_pushable: false, is_pushable_by_piston: false },
+					'minecraft:ambient_sound_interval': { event_name: 'ambient', value: 4, range: 4 },
+				},
+				// The bird's own size again, once it has been off a shoulder (see the base).
+				[`${NS}:own_size`]: {
+					'minecraft:collision_box': { width: bird.width, height: bird.height },
 				},
 			},
 			events: {
@@ -119,21 +152,26 @@ function entity(bird) {
 				// The perch script's bodies (src/main.ts). Each takes the others off, so the bird is
 				// always in exactly one of free_body, held_body and asleep_body.
 				[`${NS}:hold`]: {
-					add: { component_groups: [`${NS}:held_body`] },
-					remove: { component_groups: [`${NS}:free_body`, `${NS}:asleep_body`, `${NS}:pet_goals`] },
+					add: { component_groups: [`${NS}:held_body`, `${NS}:own_size`] },
+					remove: { component_groups: [`${NS}:free_body`, `${NS}:asleep_body`, `${NS}:shoulder_body`, `${NS}:pet_goals`] },
 				},
 				[`${NS}:sleep`]: {
-					add: { component_groups: [`${NS}:asleep_body`] },
-					remove: { component_groups: [`${NS}:free_body`, `${NS}:held_body`, `${NS}:pet_goals`] },
+					add: { component_groups: [`${NS}:asleep_body`, `${NS}:own_size`] },
+					remove: { component_groups: [`${NS}:free_body`, `${NS}:held_body`, `${NS}:shoulder_body`, `${NS}:pet_goals`] },
+				},
+				// The shoulder script's body (src/shoulder.ts).
+				[`${NS}:shoulder`]: {
+					add: { component_groups: [`${NS}:shoulder_body`] },
+					remove: { component_groups: [`${NS}:free_body`, `${NS}:held_body`, `${NS}:asleep_body`, `${NS}:own_size`, `${NS}:pet_goals`] },
 				},
 				[`${NS}:release`]: {
-					add: { component_groups: [`${NS}:free_body`, `${NS}:pet_goals`] },
-					remove: { component_groups: [`${NS}:held_body`, `${NS}:asleep_body`] },
+					add: { component_groups: [`${NS}:free_body`, `${NS}:pet_goals`, `${NS}:own_size`] },
+					remove: { component_groups: [`${NS}:held_body`, `${NS}:asleep_body`, `${NS}:shoulder_body`] },
 				},
 				// A wild bird found without its free body (it never has a perch): just the body back.
 				[`${NS}:release_wild`]: {
-					add: { component_groups: [`${NS}:free_body`] },
-					remove: { component_groups: [`${NS}:held_body`, `${NS}:asleep_body`] },
+					add: { component_groups: [`${NS}:free_body`, `${NS}:own_size`] },
+					remove: { component_groups: [`${NS}:held_body`, `${NS}:asleep_body`, `${NS}:shoulder_body`] },
 				},
 			},
 		},

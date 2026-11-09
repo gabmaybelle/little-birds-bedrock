@@ -60,8 +60,8 @@ and taming all good.
   your nearest bird within 16 blocks the perch has a seat for, which makes it home. Someone else's
   birds don't answer.
 - Setting down: a bird on your shoulder goes onto the perch you use (or, if it's another bird's
-  perch, hops down at your feet); a sneak-use on any block sets it down there. This waits on the
-  shoulder itself (session 4) to have a bird to set down.
+  perch, hops down at your feet); a sneak-use on any block sets it down there (the shoulder came
+  in session 4).
 - Owners: the game keeps no owner a script can read once a bird is tame, so the player who tames it
   with seeds is written down on the bird. A bird tamed before this (no owner on record) takes the
   first player who uses it, and answers anyone's call until then.
@@ -122,6 +122,84 @@ Checks, all passing (after session 3):
   Session 3's last Preview run showed it too (two flocks, each flew on the second try), so it is
   not only the release. Worth watching for in the game: wild birds that stand still for a long time.
 
+**The greeting, dusk and the shoulder (2026-11-09, session 4).** Java's `Shoulder`, the greeting
+and shoulder parts of `LittleBird`, and the dusk its `RoostGoal` keys on, on Bedrock. The rules are
+in `src/day-logic.ts` and `src/shoulder-logic.ts` (no game objects, so the unit tests run them);
+`src/sky.ts`, `src/greeting.ts` and `src/shoulder.ts` apply them.
+
+- Dusk: when a bird goes home to sleep is now Java's own "dark outside", worked out the same way:
+  the overworld's sky light (full until 11867, down to its night level by 13670, back up from
+  22330), dark once it is 4 or more down. In clear weather that is from about 12523 to 23477
+  (session 3 used 13000 to 23000); rain brings dusk on at about 12000; a thunderstorm is dark all
+  day, so the birds go home and sleep through one, as on Java. Never dark in the Nether or the End.
+  The script can't ask the weather, only hear it change, so the last change is kept on the world.
+  On its perch after dark it goes quiet (session 3's asleep body), with its settle murmur.
+- The greeting: a tamed bird keeps the day-clock time its owner was last within 8 blocks, looking
+  every half second. When its owner comes back within reach after an hour of the day clock or more
+  away, it says hello once: its greeting call and the greeting pose (a bob of the head, a flutter
+  of the wings; the cockatiel's crest up) for a second and a half, two for a cockatiel. A bird on
+  its owner's shoulder is never away; a clock turned back starts the count again.
+- The shoulder: sneak-use a tamed budgie, cockatiel or lovebird with an empty hand and it sits on
+  your right shoulder, held there every tick facing your way, chattering. Sneak-use it again, or
+  sneak-use a block, to set it down; use a perch to put it on the bar. One bird to a shoulder;
+  canaries and zebra finches keep to their perches (a sneak-use asks nothing of them); someone
+  else's bird doesn't come; a bird on its perch can be taken off it. It comes with you through
+  portals, straight onto the shoulder on the other side. If you leave the game, die or turn
+  spectator it is set down where it is. A bird left marked as on a shoulder with nothing holding it
+  (a world saved with it there) goes back to its owner if they are within 32 blocks, else is set
+  down: never left hanging in the air.
+- On the shoulder the bird's collision box shrinks to 0.1 (its hit box stays its own size, so it
+  is as easy to sneak-use off), and it sits 0.51 out instead of Java's 0.42: Bedrock pushes a
+  player out of any box overlapping theirs, and in the spike that lifted a Creative player into
+  flight and stopped crouching. Together they clear the player's box at every angle (the unit test
+  turns all the way round). It can't suffocate in a wall beside you, as on Java.
+- The bird's size stays in the entity's base, so a new bird gets no size from a component group as
+  it spawns. With the size in the groups, new wild flocks stood still far more often (Preview: a
+  flock stuck in 7 runs of 10, two of them through both tries, against none in 5).
+
+Looked at in the game (2026-11-09, 1.26.63): the shoulder, the greeting and dusk all work well.
+
+Differences from Java:
+- A bird told to sit and then taken onto the shoulder sits again when set down (Java's pick-up
+  stands it up; the script API can't).
+- The shoulder bird is placed by the server each tick, so on a server it may trail a little when
+  you run, and nothing hides it in first person (Gabby judged the spike's "close enough").
+- The greeting looks every half second, as Java does, and the weather is known only from its last
+  change since the pack was added.
+
+Not built, by choice: the first-roost message. Java 0.3.0 has no "A friend at the window"
+advancement (it was in the first plan, not in any release), so a Bedrock message would be new, not
+a match; Gabby (2026-11-09): skip it for 0.1.0.
+
+Checks after session 4:
+- `npm test`: 33 unit tests (8 new). Dusk: dark from about 12523 to 23477 in clear weather, at 12000
+  in rain, all day in a thunderstorm, and the Java roost goal and roosting are keyed to it. The
+  greeting: Java's reach (8), wait (1000), how often it looks (10 ticks) and pose lengths (30, the
+  cockatiel 40), read from the Java classes and matching the bird table; hello once after an hour
+  away, none after 999 ticks, none on first sight, the clock turned back, never away on a shoulder,
+  the next morning a hello. The shoulder: Java's seat sums (up 1.2, out to the right) at four
+  angles; clear of the player's box at every angle; the shoulder body's size, hit box, no
+  suffocating, chatter; canaries and finches don't ride, read from the Java classes; what a
+  sneak-use does (on, off, one to a shoulder, someone else's, wild, a chick, a song bird); every
+  event that takes the shoulder body off gives the size back, and no group sets it at spawn.
+- `npm run typecheck`: clean. `npm run validate`: 43 files, no errors (13 known schema lags).
+- Self-test: 38 cases on each server (7 new) and the restart check. Dusk: a thunderstorm by day
+  sends a bird home asleep, and it wakes when the storm clears. The greeting: no hello while its
+  owner is away, one hello on coming home after an hour and a half (the pose on, then off), none
+  while they stay, none after half an hour, one the next morning. The shoulder: on and off by
+  sneak-use, held at the seat as its owner walks and turns, facing their way, still there after
+  3 s, its box 0.1 on the shoulder and 0.4 after; a second bird, a canary and a stranger's bird
+  don't come on; taken from its perch and the perch lets it go; set down where it is when its owner
+  dies or leaves; through to the Nether and back on the shoulder; a stray shoulder bird rejoins its
+  owner or is set down; the perch's set-down cases with the real shoulder. Across a server restart
+  a shoulder budgie whose owner is gone is set down, not left hanging.
+  On the final files, Preview 1.26.70.23 and release 1.26.63.1 both pass all 38 and the restart
+  check, with no error or warning lines. The soak's cost is as in session 3 (about 0.3 to 0.4 ms a
+  tick on average, 1.2 to 1.4 ms a pass, 0.3 to 0.4 ms for the greeting watch, worst 3 to 7 ms).
+  Its worst-moment budget is close: one earlier release run on the same files came to 6 ms for a
+  single tick against the 5 ms budget, while its averages were unchanged.
+  Wild flocks: as in session 3, a fresh flock sometimes waits for the second try before flying.
+
 ## Next
 
-1. Session 4: greeting, dusk, shoulder (with portals, logout, death), the first-roost message.
+1. Session 5: lovebird pairs, finch company, songs; breeding and chicks.

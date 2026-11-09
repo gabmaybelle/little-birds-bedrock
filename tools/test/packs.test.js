@@ -17,9 +17,24 @@ test('no component is both in the base and in a component group', () => {
 	for (const b of birds) {
 		const e = packs.entity(b)['minecraft:entity'];
 		const base = new Set(Object.keys(e.components));
+		// The one exception: the collision box. The base has the bird's size (no group may set it as
+		// a bird appears: new flocks then stood still); the shoulder body shrinks it; every event that
+		// takes the shoulder body off adds own_size, which sets the bird's size back.
+		const sizers = ['little_birds:shoulder_body', 'little_birds:own_size'];
 		for (const [g, comps] of Object.entries(e.component_groups)) {
-			for (const c of Object.keys(comps)) assert.ok(!base.has(c), `${b.id}: ${c} is in the base and in ${g}`);
+			for (const c of Object.keys(comps)) {
+				if (c === 'minecraft:collision_box' && sizers.includes(g)) continue;
+				assert.ok(!base.has(c), `${b.id}: ${c} is in the base and in ${g}`);
+			}
 		}
+		for (const [name, ev] of Object.entries(e.events)) {
+			const adds = (ev.add && ev.add.component_groups) || [], removes = (ev.remove && ev.remove.component_groups) || [];
+			if (removes.includes('little_birds:shoulder_body')) assert.ok(adds.includes('little_birds:own_size'), `${b.id}: ${name} takes the shoulder off but not the small box`);
+			if (adds.includes('little_birds:shoulder_body')) assert.ok(removes.includes('little_birds:own_size'), `${b.id}: ${name} leaves own_size on the shoulder`);
+		}
+		assert.ok(!e.events['minecraft:entity_spawned'].add.component_groups.includes('little_birds:own_size'), `${b.id}: a new bird gets its size from a group`);
+		assert.deepStrictEqual(e.components['minecraft:collision_box'], { width: b.width, height: b.height }, `${b.id}: base size`);
+		assert.deepStrictEqual(e.component_groups['little_birds:own_size']['minecraft:collision_box'], { width: b.width, height: b.height }, `${b.id}: own_size`);
 	}
 });
 

@@ -130,10 +130,6 @@ test('when a bird goes home and how long it stays', () => {
 	assert.match(roost, /DAYTIME_VISIT_CHANCE = 600/);
 });
 
-test('night is the dark hours of the day clock', () => {
-	assert.ok(!L.isNight(1000) && !L.isNight(12999) && L.isNight(13000) && L.isNight(18000) && !L.isNight(23000) && L.isNight(24000 + 18000));
-});
-
 // ---------------------------------------------------------------- calling
 
 test('using a perch calls your own bird first, then your nearest bird it has a seat for', () => {
@@ -205,15 +201,15 @@ test('the perch recipe is Java\'s', () => {
 test('each perch event leaves a bird in exactly one body', () => {
 	for (const b of birds) {
 		const e = packs.entity(b)['minecraft:entity'];
-		const bodies = ['free_body', 'held_body', 'asleep_body'].map((g) => `little_birds:${g}`);
-		for (const ev of ['hold', 'sleep', 'release', 'release_wild']) {
+		const bodies = ['free_body', 'held_body', 'asleep_body', 'shoulder_body'].map((g) => `little_birds:${g}`);
+		for (const ev of ['hold', 'sleep', 'shoulder', 'release', 'release_wild']) {
 			const def = e.events[`little_birds:${ev}`];
 			const added = def.add.component_groups.filter((g) => bodies.includes(g));
 			const removed = def.remove.component_groups.filter((g) => bodies.includes(g));
 			assert.strictEqual(added.length, 1, `${b.id} ${ev} adds one body`);
 			assert.deepStrictEqual([...added, ...removed].sort(), bodies.slice().sort(), `${b.id} ${ev} takes the other bodies off`);
 		}
-		for (const ev of ['hold', 'sleep']) assert.ok(e.events[`little_birds:${ev}`].remove.component_groups.includes('little_birds:pet_goals'), `${ev}: no following while held`);
+		for (const ev of ['hold', 'sleep', 'shoulder']) assert.ok(e.events[`little_birds:${ev}`].remove.component_groups.includes('little_birds:pet_goals'), `${ev}: no following while held`);
 		assert.ok(!e.component_groups['little_birds:asleep_body']['minecraft:ambient_sound_interval'], 'quiet asleep');
 		assert.ok(e.component_groups['little_birds:held_body']['minecraft:ambient_sound_interval'], 'chatters on its perch by day, as on Java');
 	}

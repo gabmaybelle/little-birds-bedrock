@@ -15,9 +15,10 @@
 import { world, system, Entity, Block, Dimension, Player, Vector3, InputButton, ButtonState, Direction } from "@minecraft/server";
 import {
   BirdInfo, CallCandidate, Facing, PerchInfo, birdToCall, distSq, dwellTicks, flightStep, goesHome, hasSeatFor,
-  homeBirds, isNight, keepsSeat, nearHome, nearestFreePerch, offSeat, parsePerchKey, perchKey, seat, seatOffset,
+  homeBirds, keepsSeat, nearHome, nearestFreePerch, offSeat, parsePerchKey, perchKey, seat, seatOffset,
   seatYaw, staysHome, inBox, DAY_VISIT_CHANCE, FIND_REACH, GIVE_UP_TICKS,
 } from "./perch-logic.js";
+import { darkOutside } from "./sky.js";
 
 export const NS = "little_birds";
 export const PERCH = `${NS}:perch`;
@@ -77,10 +78,10 @@ function info(bird: Entity): BirdInfo {
  * Stand-in owners for the self-test, which has no player: an owner id and where that "player"
  * stands. Only the test hooks (test-hooks.ts) fill it; a real player of the same id wins.
  */
-export const standIns = new Map<string, { dimensionId: string; location: Vector3 }>();
+export const standIns = new Map<string, { dimensionId: string; location: Vector3; yaw?: number }>();
 
 /** Where the bird's owner is, if they are in this world; undefined if offline, elsewhere, or unknown. */
-function ownerLocation(bird: Entity, dimension: Dimension, players: Map<string, Player>): Vector3 | undefined {
+export function ownerLocation(bird: Entity, dimension: Dimension, players: Map<string, Player>): Vector3 | undefined {
   const id = ownerIdOf(bird);
   if (id === undefined) return undefined;
   const p = players.get(id);
@@ -171,6 +172,15 @@ function getUp(bird: Entity) {
   active.delete(bird.id);
 }
 
+/** Off its perch or its way home without a body change: the shoulder takes it from here. */
+export function leavePerch(bird: Entity) {
+  active.delete(bird.id);
+  called.delete(bird.id);
+  bird.setProperty(`${NS}:perched`, false);
+  bird.setProperty(`${NS}:roosting`, false);
+  setMode(bird, "free");
+}
+
 function startHoming(bird: Entity, key: string, block: Vector3, facing: Facing, along: number) {
   if (modeOf(bird) === "free") hold(bird);
   setMode(bird, "homing");
@@ -182,7 +192,7 @@ function startHoming(bird: Entity, key: string, block: Vector3, facing: Facing, 
 
 /** On the seat: facing the perch's way, feet on the bar; asleep (and a soft murmur) after dark. */
 function settle(a: Active, quiet = false) {
-  const bird = a.bird, night = isNight(world.getTimeOfDay());
+  const bird = a.bird, night = darkOutside(bird.dimension.id);
   try {
     bird.clearVelocity();
   } catch {
@@ -308,9 +318,10 @@ function perchesIn(dimension: Dimension): PerchInfo[] {
 }
 
 function tickBird(bird: Entity, me: BirdInfo, pass: Pass) {
-  // On a shoulder, nothing here moves it: the shoulder has it.
+  // On a shoulder, nothing here moves it: the shoulder has it (and mends one nothing is holding).
   if (boolProp(bird, "shoulder")) {
     active.delete(bird.id);
+    shoulderHooks.seen(bird, pass.players);
     return;
   }
   const mode = modeOf(bird);
@@ -391,8 +402,8 @@ function tickBird(bird: Entity, me: BirdInfo, pass: Pass) {
 
 system.runInterval(() => timed(perf.second, () => {
   const players = new Map(world.getAllPlayers().map((p) => [p.id, p] as [string, Player]));
-  const night = isNight(world.getTimeOfDay());
   for (const dimension of allDimensions()) {
+    const night = darkOutside(dimension.id);
     let entities: Entity[];
     try {
       entities = dimension.getEntities({ families: [FAMILY] });
@@ -422,8 +433,14 @@ export function shoulderBirdOf(player: { id: string; dimension: Dimension; locat
     .find((b) => boolProp(b, "shoulder") && ownerIdOf(b) === player.id);
 }
 
-/** Off the shoulder and back on its own feet (shoulder.ts hooks in here when a bird is held there). */
-export const shoulderHooks = { setDown: (bird: Entity) => bird.setProperty(`${NS}:shoulder`, false) };
+/**
+ * Where the shoulder (shoulder.ts) hooks in, so this file needn't import it: setting a bird down
+ * off a shoulder, and a bird marked as on a shoulder seen by the once-a-second pass.
+ */
+export const shoulderHooks = {
+  setDown: (bird: Entity) => bird.setProperty(`${NS}:shoulder`, false),
+  seen: (_bird: Entity, _players: Map<string, Player>) => {},
+};
 
 function birdsAround(dimension: Dimension, block: Vector3): Entity[] {
   return dimension.getEntities({ families: [FAMILY], location: { x: block.x + 0.5, y: block.y + 0.5, z: block.z + 0.5 }, maxDistance: 40 });

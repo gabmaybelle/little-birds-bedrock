@@ -41,12 +41,6 @@ export const SHARED_SEAT = 0.2;
 /** Blocks a tick on the way home: about a bird's flying speed. */
 export const FLY_SPEED = 0.14;
 
-/** The night on the day clock: the hours the Java edition counts as dark outside, roughly. */
-export function isNight(timeOfDay: number): boolean {
-  const t = ((timeOfDay % 24000) + 24000) % 24000;
-  return t >= 13000 && t < 23000;
-}
-
 // ---------------------------------------------------------------- seats (PerchBlock)
 
 /**

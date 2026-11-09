@@ -7,7 +7,7 @@
 // Each case prints "LB TEST: CASE <name>: PASS" or "... FAIL <why>"; tools/bds-check.js reads them.
 // It reads only what the game shows (components, properties, positions), so it checks the birds the
 // way a player would meet them.
-import { world, system, ItemStack, Entity, Dimension, Vector3, BlockPermutation } from "@minecraft/server";
+import { world, system, ItemStack, Entity, Dimension, Vector3, BlockPermutation, WeatherType } from "@minecraft/server";
 
 const NS = "little_birds";
 const BIRDS: { id: string; colours: number; health: number; width: number; height: number }[] = [
@@ -366,26 +366,243 @@ perchCase("perch_call", async () => {
 perchCase("perch_set_down", async () => {
   const p = placePerch(-15, -35);
   standAt(p);
-  const stand = { x: p.x + 0.5, y: GROUND, z: p.z + 2.5 };
   const b = await petBird("budgie", p.x, p.z + 3);
-  b.setProperty(`${NS}:shoulder`, true);
-  b.teleport({ x: stand.x + 0.5, y: GROUND + 1.2, z: stand.z });
-  await wait(2);
+  must((await ask(`bird_use owner1 ${b.id}`)).acted && (await waitFor(() => onShoulder(b), 10, 1)), "the budgie did not go onto the shoulder");
   const use = await ask(`use owner1 ${p.x} ${p.y} ${p.z}`);
   must(use.acted, "using the perch with a bird on the shoulder did nothing");
   must(await waitFor(() => onSeat(b, p), 10, 1), "not straight onto the seat");
   must(b.getProperty(`${NS}:shoulder`) === false, "still on the shoulder");
   // Another bird on the shoulder, and a sneak-use on the ground beside: it hops down there.
   const c = await petBird("cockatiel", p.x, p.z + 3);
-  c.setProperty(`${NS}:shoulder`, true);
-  c.teleport({ x: stand.x + 0.5, y: GROUND + 1.2, z: stand.z });
-  await wait(2);
+  must((await ask(`bird_use owner1 ${c.id}`)).acted && (await waitFor(() => onShoulder(c), 10, 1)), "the cockatiel did not go onto the shoulder");
   const ground = { x: p.x + 3, y: GROUND - 1, z: p.z + 3 };
   const sneak = await ask(`use owner1 ${ground.x} ${ground.y} ${ground.z} sneak Up`);
   must(sneak.acted, "a sneak-use of the ground did nothing");
   await wait(5);
   must(c.getProperty(`${NS}:shoulder`) === false, "still on the shoulder after the sneak-use");
   must(dist(c.location, { x: ground.x + 0.5, y: GROUND, z: ground.z + 0.5 }) < 0.6, `not set down on the block (${dist(c.location, { x: ground.x + 0.5, y: GROUND, z: ground.z + 0.5 }).toFixed(2)} off)`);
+});
+
+// ---------------------------------------------------------------- dusk, the greeting, the shoulder
+
+const onShoulder = (e: Entity) => e.isValid && e.getProperty(`${NS}:shoulder`) === true;
+const greetingPose = (e: Entity) => e.isValid && e.getProperty(`${NS}:greeting`) === true;
+type Full = State & { shoulder: string; greetingPose: boolean; lastSaw: number; greetings: number; clock: number; dimension: string | null };
+const full = async (e: Entity) => (await ask(`state ${e.id}`)) as unknown as Full;
+/** Java's seat: up 1.2 from the owner's feet, out to the right (0.51 here: see shoulder-logic.ts). */
+const shoulderSpot = (o: Vector3, yaw: number): Vector3 => {
+  const r = (yaw * Math.PI) / 180;
+  return { x: o.x - Math.cos(r) * 0.51, y: o.y + 1.2, z: o.z - Math.sin(r) * 0.51 };
+};
+/** The width of the bird's collision box, as the game has it now. */
+const box = (e: Entity) => ({ width: Math.round(e.getAABB().extent.x * 2 * 1000) / 1000 });
+
+// Dusk in a thunderstorm: dark outside by day, as on Java, so a bird with its owner home goes to its
+// perch and sleeps; when the storm clears it wakes.
+perchCase("dusk_thunder", async () => {
+  const p = placePerch(-30, -28);
+  standAt(p);
+  const b = await petBird("budgie", -27, -28);
+  await wait(40);
+  must(!asleep(b), "asleep by day before the storm");
+  overworld().setWeather(WeatherType.Thunder, 20 * 600);
+  try {
+    must(await waitFor(() => onSeat(b, p) && asleep(b), 600), `no roost in the thunderstorm: perched ${perched(b)}, asleep ${asleep(b)}`);
+    overworld().setWeather(WeatherType.Clear, 20 * 600);
+    must(await waitFor(() => perched(b) && !asleep(b), 60), "still asleep 3 s after the storm cleared");
+  } finally {
+    overworld().setWeather(WeatherType.Clear, 20 * 600);
+  }
+});
+
+// The greeting: its owner back within 8 blocks after an hour of the day clock away gets one hello
+// (the call, and the pose for 30 ticks); back after less than an hour, or staying near, gets none.
+perchCase("greeting_home", async () => {
+  const b = await petBird("lovebird", -20, -28);
+  // The owner keeps close to the bird (it wanders), and moves well off when away.
+  let near = true;
+  const follow = system.runInterval(() => {
+    if (near && b.isValid) debug(`stand_in owner1 ${b.location.x + 2} ${b.location.y} ${b.location.z}`);
+  }, 2);
+  let wasPose = false, posesOn = 0;
+  const trace = system.runInterval(() => {
+    const p = greetingPose(b);
+    if (p && !wasPose) posesOn++;
+    if (p && !wasPose) log(`note greeting pose on at tick ${system.currentTick}, near ${near}, clock ${world.getDay() * 24000 + world.getTimeOfDay()}, bird ${b.location.x.toFixed(1)},${b.location.y.toFixed(1)},${b.location.z.toFixed(1)}`);
+    wasPose = p;
+  }, 1);
+  try {
+    world.setTimeOfDay(1000);
+    await wait(30);
+    let s = await full(b);
+    must(s.lastSaw >= 0 && s.greetings === 0, `seen at once, no hello yet: last saw ${s.lastSaw}, ${s.greetings} greetings`);
+    // Away for an hour and a half of the day clock, then back.
+    near = false;
+    debug(`stand_in owner1 ${b.location.x + 40} ${GROUND} ${b.location.z}`);
+    await wait(30);
+    world.setTimeOfDay(2500);
+    await wait(30);
+    must((await full(b)).greetings === 0, "said hello while its owner was still away");
+    near = true;
+    must(await waitFor(() => greetingPose(b), 40, 1), "no greeting pose within two seconds of coming home");
+    s = await full(b);
+    must(s.greetings === 1, `${s.greetings} greetings on coming home`);
+    must(await waitFor(() => !greetingPose(b), 45, 1), "the greeting pose did not end");
+    await wait(60);
+    must((await full(b)).greetings === 1, "a second hello while its owner stayed near");
+    // Away for less than an hour: no hello.
+    near = false;
+    debug(`stand_in owner1 ${b.location.x + 40} ${GROUND} ${b.location.z}`);
+    await wait(30);
+    world.setTimeOfDay(3000);
+    near = true;
+    await wait(40);
+    must((await full(b)).greetings === 1, "said hello after only half an hour away");
+    // Away overnight: on Bedrock, setting the time to an earlier hour rolls on to the next day (the
+    // day clock never runs back that way), so this is the next morning, and a hello.
+    near = false;
+    debug(`stand_in owner1 ${b.location.x + 40} ${GROUND} ${b.location.z}`);
+    await wait(30);
+    const before = (await full(b)).clock;
+    world.setTimeOfDay(1000);
+    await wait(30);
+    const after = (await full(b)).clock;
+    must(after > before, `the day clock went back (${before} to ${after}) when the time was set to morning`);
+    const posesBefore = posesOn;
+    const countBefore = (await full(b)).greetings;
+    must(countBefore === 1, `said hello while its owner was away overnight (${countBefore} greetings, clock ${before} then ${after})`);
+    near = true;
+    let s2: Full = await full(b);
+    for (let t = 0; t < 100 && s2.greetings < 2; t += 5) {
+      await wait(5);
+      s2 = await full(b);
+    }
+    must(s2.greetings === 2, `no hello the next morning: ${s2.greetings} greetings in all, clock ${before} then ${after}, last saw ${s2.lastSaw}`);
+    must(await waitFor(() => posesOn > posesBefore, 40, 1), "the next morning's hello was counted but its pose never showed");
+  } finally {
+    system.clearRun(follow);
+    system.clearRun(trace);
+  }
+});
+
+// The shoulder: a sneak-use puts a tamed bird on its owner's right shoulder, held there every tick
+// as the owner moves and turns, its box small and clear of the owner's; one bird to a shoulder;
+// song birds and strangers' birds don't come; a sneak-use takes it off and it is free again.
+perchCase("shoulder_on_off", async () => {
+  const o = { x: -9.5, y: GROUND, z: -27.5 };
+  debug(`stand_in owner1 ${o.x} ${o.y} ${o.z} 0`);
+  const b = await petBird("budgie", -10, -26);
+  must((await ask(`bird_use owner1 ${b.id}`)).acted, "the sneak-use did nothing");
+  must(await waitFor(() => onShoulder(b), 10, 1), "not on the shoulder");
+  must(await waitFor(() => dist(b.location, shoulderSpot(o, 0)) < 0.05, 10, 1), `${dist(b.location, shoulderSpot(o, 0)).toFixed(2)} from the shoulder`);
+  must(speed(b) === 0, `movement ${speed(b)} on a shoulder`);
+  must(Math.abs(box(b).width - 0.1) < 1e-6, `collision box ${box(b).width} wide on a shoulder, expected 0.1`);
+  must((await full(b)).shoulder === "held for owner1", "the shoulder loop doesn't hold it");
+  // The owner walks on and turns: the bird keeps to the shoulder, facing their way.
+  const o2 = { x: o.x + 3, y: GROUND, z: o.z + 1 };
+  debug(`stand_in owner1 ${o2.x} ${o2.y} ${o2.z} 90`);
+  must(await waitFor(() => dist(b.location, shoulderSpot(o2, 90)) < 0.05, 10, 1), `didn't follow: ${dist(b.location, shoulderSpot(o2, 90)).toFixed(2)} off`);
+  must(yawGap(b.getRotation().y, 90) < 1, `faces ${b.getRotation().y.toFixed(1)}, its owner faces 90`);
+  await wait(60);
+  must(onShoulder(b) && dist(b.location, shoulderSpot(o2, 90)) < 0.05, "fell or drifted off the shoulder in 3 s");
+  // One bird to a shoulder; a song bird keeps to its perch; a stranger's sneak-use isn't the shoulder's.
+  const second = await petBird("cockatiel", -8, -26);
+  await ask(`bird_use owner1 ${second.id}`);
+  await wait(5);
+  must(!onShoulder(second), "a second bird went onto the same shoulder");
+  const canary = await petBird("canary", -8, -25);
+  const c = await ask(`bird_use owner1 ${canary.id}`);
+  await wait(5);
+  must(c.acted && !onShoulder(canary), "a canary went onto the shoulder (or the use went on to sit it)");
+  const theirs = await petBird("lovebird", -8, -24, "owner2");
+  must(!(await ask(`bird_use owner1 ${theirs.id}`)).acted, "someone else's bird answered");
+  // Off again: free, its own size, moving.
+  must((await ask(`bird_use owner1 ${b.id}`)).acted, "the second sneak-use did nothing");
+  must(await waitFor(() => !onShoulder(b) && Math.abs(speed(b) - 0.4) < 1e-6, 20, 1), `still held after the sneak-use off (movement ${speed(b)})`);
+  must(Math.abs(box(b).width - 0.4) < 1e-6, `collision box ${box(b).width} wide after, expected 0.4`);
+  must((await full(b)).shoulder === "not held", "still in the shoulder loop");
+});
+
+// A bird on its perch can be taken onto the shoulder, and the perch lets it go.
+perchCase("shoulder_from_perch", async () => {
+  const p = placePerch(0, -28);
+  away();
+  const b = await petBird("cockatiel", 2, -28);
+  must(await waitFor(() => perched(b), 400), "never went home");
+  debug(`stand_in owner1 ${p.x + 0.5} ${GROUND} ${p.z + 2.5} 180`);
+  must((await ask(`bird_use owner1 ${b.id}`)).acted, "the sneak-use did nothing");
+  must(await waitFor(() => onShoulder(b) && !perched(b), 10, 1), `perched ${perched(b)}, shoulder ${onShoulder(b)}`);
+  await wait(60);
+  must(onShoulder(b) && !perched(b), "the perch took it back off the shoulder");
+  must(dist(b.location, shoulderSpot({ x: p.x + 0.5, y: GROUND, z: p.z + 2.5 }, 180)) < 0.05, "not on the shoulder");
+});
+
+// Its owner goes for good: dying sets it down where it is; leaving the game too.
+perchCase("shoulder_owner_gone", async () => {
+  debug(`stand_in owner1 10.5 ${GROUND} -27.5 0`);
+  const b = await petBird("budgie", 10, -26);
+  await ask(`bird_use owner1 ${b.id}`);
+  must(await waitFor(() => onShoulder(b), 10, 1), "not on the shoulder");
+  const at = b.location;
+  await ask("owner_gone owner1");
+  must(await waitFor(() => !onShoulder(b) && Math.abs(speed(b) - 0.4) < 1e-6, 10, 1), "still held after its owner died");
+  must(dist(b.location, at) < 1.5, "not set down where it was");
+  // On again, then its owner leaves the game (the stand-in is gone): set down by the tick.
+  await ask(`bird_use owner1 ${b.id}`);
+  must(await waitFor(() => onShoulder(b), 10, 1), "not back on the shoulder");
+  away();
+  must(await waitFor(() => !onShoulder(b) && Math.abs(speed(b) - 0.4) < 1e-6, 10, 1), "still held after its owner left");
+});
+
+// Through a portal: its owner goes to the Nether and the bird comes along, straight onto the
+// shoulder; back again the same way.
+perchCase("shoulder_portal", async () => {
+  const nether = world.getDimension("minecraft:nether");
+  nether.runCommand("tickingarea add circle 0 64 0 1 lbnether");
+  try {
+    await wait(60);
+    debug(`stand_in owner1 20.5 ${GROUND} -27.5 0`);
+    const b = await petBird("lovebird", 20, -26);
+    await ask(`bird_use owner1 ${b.id}`);
+    must(await waitFor(() => onShoulder(b), 10, 1), "not on the shoulder");
+    const there = { x: 0.5, y: 100, z: 0.5 };
+    debug(`stand_in owner1 ${there.x} ${there.y} ${there.z} 0 minecraft:nether`);
+    await ask("owner_travelled owner1");
+    let s: Full | undefined, arrived = false;
+    for (let t = 0; t < 100 && !arrived; t += 5) {
+      await wait(5);
+      s = await full(b);
+      arrived = s.dimension === "minecraft:nether" && s.shoulder.startsWith("held");
+    }
+    must(arrived, `not in the Nether on the shoulder after 5 s: ${JSON.stringify(s)}`);
+    const inNether = nether.getEntities({ families: ["little_bird"], location: there, maxDistance: 3 })[0];
+    must(inNether && onShoulder(inNether) && dist(inNether.location, shoulderSpot(there, 0)) < 0.1, "not at its owner's shoulder in the Nether");
+    spawned.push(inNether);
+    debug(`stand_in owner1 20.5 ${GROUND} -27.5 0`);
+    await ask("owner_travelled owner1");
+    let back: Entity | undefined;
+    must(await waitFor(() => (back = overworld().getEntities({ families: ["little_bird"], location: { x: 20.5, y: GROUND, z: -27.5 }, maxDistance: 3 }).find(onShoulder)) !== undefined, 100), "did not come back to the overworld");
+    spawned.push(back!);
+    must(await waitFor(() => dist(back!.location, shoulderSpot({ x: 20.5, y: GROUND, z: -27.5 }, 0)) < 0.1, 20, 1), "not on the shoulder back home");
+  } finally {
+    nether.runCommand("tickingarea remove lbnether");
+  }
+});
+
+// A bird marked as on a shoulder that nothing holds (a world saved with it there): back onto its
+// owner's shoulder if they are near, else set down. Never left hanging in the air.
+perchCase("shoulder_stray", async () => {
+  debug(`stand_in owner1 30.5 ${GROUND} -27.5 0`);
+  const b = await petBird("budgie", 30, -26);
+  b.triggerEvent(`${NS}:shoulder`);
+  b.setProperty(`${NS}:shoulder`, true);
+  must(await waitFor(() => dist(b.location, shoulderSpot({ x: 30.5, y: GROUND, z: -27.5 }, 0)) < 0.05, 40), "did not rejoin its owner's shoulder");
+  must((await full(b)).shoulder === "held for owner1", "not held after rejoining");
+  const c = await petBird("cockatiel", 32, -58);
+  away();
+  c.triggerEvent(`${NS}:shoulder`);
+  c.setProperty(`${NS}:shoulder`, true);
+  must(await waitFor(() => !onShoulder(c) && Math.abs(speed(c) - 0.4) < 1e-6, 40), "left hanging with its owner gone");
 });
 
 // A sleeping bird's chunk unloads and loads again: still asleep, on its seat, watched again.
@@ -453,10 +670,11 @@ perchCase("perch_soak", async () => {
   must(flock.every((b) => b.isValid), `${flock.filter((b) => !b.isValid).length} birds lost`);
   const p1 = (await ask("perf")) as unknown as Perf;
   const tick = { runs: p1.tick.runs - p0.tick.runs, ms: p1.tick.ms - p0.tick.ms }, sec = { runs: p1.second.runs - p0.second.runs, ms: p1.second.ms - p0.second.ms };
-  log(`note perch_soak cost: per tick ${(tick.ms / tick.runs).toFixed(3)} ms mean, ${p1.tick.max} ms worst; once-a-second pass ${(sec.ms / sec.runs).toFixed(2)} ms mean, ${p1.second.max} ms worst (${n} birds, ${nights} nights, ${tick.runs} ticks)`);
-  must(p1.tick.max <= 5 && p1.second.max <= 10, `over budget: worst tick ${p1.tick.max} ms (budget 5), worst pass ${p1.second.max} ms (budget 10)`);
+  log(`note perch_soak cost: per tick ${(tick.ms / tick.runs).toFixed(3)} ms mean, ${p1.tick.max} ms worst; once-a-second pass ${(sec.ms / sec.runs).toFixed(2)} ms mean, ${p1.second.max} ms worst (${n} birds, ${nights} nights, ${tick.runs} ticks); greeting watch ${(p1.greeting.ms / Math.max(1, p1.greeting.runs)).toFixed(2)} ms mean, ${p1.greeting.max} ms worst`);
+  must(p1.tick.max <= 5 && p1.second.max <= 10 && p1.greeting.max <= 5, `over budget: worst tick ${p1.tick.max} ms (budget 5), worst pass ${p1.second.max} ms (budget 10), worst greeting watch ${p1.greeting.max} ms (budget 5)`);
 });
-type Perf = { tick: { runs: number; ms: number; max: number }; second: { runs: number; ms: number; max: number } };
+type Run = { runs: number; ms: number; max: number };
+type Perf = { tick: Run; second: Run; shoulder: Run; greeting: Run };
 
 // A server restart with a bird asleep on its perch: run restart_setup, stop the server, start it
 // on the same world (bds-check.js --keep-world), run restart_check. Not in the default run.
@@ -473,6 +691,15 @@ cases.push({
     b.triggerEvent("minecraft:on_tame");
     await wait(2);
     debug(`own ${b.id} owner1`);
+    // And a budgie on its owner's shoulder when the server stops.
+    for (const old of overworld().getEntities({ tags: ["lb_restart_shoulder"] })) old.remove();
+    debug(`stand_in owner1 6.5 ${GROUND} -44.5 0`);
+    const c = overworld().spawnEntity(`${NS}:budgie`, { x: 6.5, y: GROUND, z: -43.5 });
+    c.addTag("lb_restart_shoulder");
+    c.triggerEvent("minecraft:on_tame");
+    await wait(2);
+    debug(`own ${c.id} owner1`);
+    must((await ask(`bird_use owner1 ${c.id}`)).acted && (await waitFor(() => onShoulder(c), 10, 1)), "the budgie did not go onto the shoulder");
     night();
     must(await waitFor(() => onSeat(b, RESTART_PERCH) && asleep(b), 600), "never roosted");
   },
@@ -493,6 +720,11 @@ cases.push({
       must(onSeat(b!, RESTART_PERCH, 0.05), "drifted off the seat after the restart");
       day();
       must(await waitFor(() => perched(b!) && !asleep(b!), 60), "not awake on its perch in the morning (its owner is away)");
+      // The shoulder bird: its owner isn't here after the restart, so it is set down, not left hanging.
+      let c: Entity | undefined;
+      must(await waitFor(() => (c = overworld().getEntities({ tags: ["lb_restart_shoulder"] })[0]) !== undefined, 100), "the shoulder budgie is not in the world after the restart");
+      spawned.push(c!);
+      must(await waitFor(() => !onShoulder(c!) && Math.abs(speed(c!) - 0.4) < 1e-6, 60), `the shoulder budgie is still held with its owner gone (movement ${speed(c!)})`);
     } finally {
       b?.remove();
       overworld().getBlock(RESTART_PERCH)?.setType("minecraft:air");
