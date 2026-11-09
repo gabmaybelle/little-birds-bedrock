@@ -69,6 +69,9 @@ and taming all good.
   pushing, no following) and watched every tick, as Java's goal is; the rest runs once a second.
   Perches are found from a list the world keeps of placed perches, not by scanning blocks.
 
+Looked at in the game (2026-11-09, 1.26.63, a laptop): the perch and everything above work as
+they should. Pictures from the game also show the birds facing back toward where the placer stood.
+
 Differences from Java, each because Bedrock can't do it the Java way:
 - A bird told to sit is not called: the script API can't stand a bird up (Java's call does).
 - A bird's wandering isn't kept within 8 blocks of its perch (Java's home restriction): Bedrock has
@@ -121,9 +124,4 @@ Checks, all passing (after session 3):
 
 ## Next
 
-1. A look at the perch in the game. Already seen in pictures from the game (1.26.63): the perch's
-   shape and texture; birds on it face back toward where the placer stood (north and east
-   perches); two finches side by side; the finches asleep with their heads tucked. Still to see:
-   placing it and the recipe, a bird landing, the budgie's pose on the bar (it stands taller than
-   the finches), calling it by day, and the flight home.
-2. Session 4: greeting, dusk, shoulder (with portals, logout, death), the first-roost message.
+1. Session 4: greeting, dusk, shoulder (with portals, logout, death), the first-roost message.
