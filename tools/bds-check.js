@@ -5,7 +5,7 @@
 // It proves the manifests, the JSON and the scripts load and that the birds spawn, tame and fly;
 // it can't see the models, the animations or hear the sounds (a game client is needed for those).
 //
-//   node tools/bds-check.js <server folder> [--zip <bedrock-server-x.y.z.zip>] [--seconds 300]
+//   node tools/bds-check.js <server folder> [--zip <bedrock-server-x.y.z.zip>] [--seconds 900]
 //        [--port 19240] [--event "little_birds:test spawn_"]
 //
 // Run `npm run build` first. Downloading and running the server means you accept Minecraft's EULA.
@@ -18,7 +18,7 @@ if (!args[0] || args[0].startsWith('--')) { console.error('usage: node tools/bds
 const folder = path.resolve(args[0]);
 const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
 const zip = opt('--zip', null);
-const seconds = parseInt(opt('--seconds', '300'), 10);
+const seconds = parseInt(opt('--seconds', '900'), 10);
 const port = parseInt(opt('--port', '19240'), 10);
 const event = opt('--event', 'little_birds:test');
 const packs = path.join(root, 'build', 'packs');
@@ -76,8 +76,10 @@ const onData = (d) => {
 	if (!done && /LB TEST: DONE/.test(all)) { done = true; setTimeout(stop, 2000); }
 };
 child.stdout.on('data', onData); child.stderr.on('data', onData);
-setTimeout(stop, seconds * 1000);
+// The time limit; cleared when the server exits, or it would keep Node running to the end of it.
+const limit = setTimeout(stop, seconds * 1000);
 child.on('exit', (code) => {
+	clearTimeout(limit);
 	const all = log.join('');
 	let contentLog = '';
 	const m = /Writing log to: (.+ContentLog[^\r\n]+\.txt)/.exec(all);

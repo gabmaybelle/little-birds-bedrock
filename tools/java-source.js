@@ -33,5 +33,6 @@ function javaRepo({ dir = null, ref = source.ref } = {}) {
 
 const ASSETS = 'common/src/main/resources/assets/little_birds/';
 const MODELS = 'common/src/main/java/com/gabbymaybelle/littlebirds/client/';
+const DATA = 'common/src/main/resources/data/little_birds/';
 
-module.exports = { javaRepo, ASSETS, MODELS };
+module.exports = { javaRepo, ASSETS, MODELS, DATA };

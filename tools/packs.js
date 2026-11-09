@@ -17,9 +17,13 @@ const SEEDS = ['wheat_seeds', 'pumpkin_seeds', 'melon_seeds', 'beetroot_seeds', 
 function properties(bird) {
 	const p = {
 		[`${NS}:colour`]: { type: 'int', range: [0, bird.colours.length - 1], default: 0, client_sync: true },
-		// Set by the scripts of later sessions (perch, shoulder, greeting, refused food); the poses
-		// that read them are already in the resource pack.
+		// Set by the scripts (perch, shoulder, greeting, refused food); the poses read them.
+		// perched: on its perch (awake by day or asleep at night); roosting: asleep on it.
+		[`${NS}:perched`]: { type: 'bool', default: false, client_sync: true },
 		[`${NS}:roosting`]: { type: 'bool', default: false, client_sync: true },
+		// Told to sit: the sittable component's sit and stand events keep this, so the scripts can
+		// tell (the script API has no way to read it).
+		[`${NS}:sitting`]: { type: 'bool', default: false, client_sync: false },
 		[`${NS}:shoulder`]: { type: 'bool', default: false, client_sync: true },
 		[`${NS}:greeting`]: { type: 'bool', default: false, client_sync: true },
 		[`${NS}:shaking`]: { type: 'bool', default: false, client_sync: true },
@@ -72,20 +76,32 @@ function entity(bird) {
 				},
 				[`${NS}:tame`]: {
 					'minecraft:is_tamed': {},
-					'minecraft:sittable': {},
+					'minecraft:sittable': { sit_event: { event: `${NS}:sat`, target: 'self' }, stand_event: { event: `${NS}:stood`, target: 'self' } },
 				},
 				// What a tamed bird does when it is free: sits when told, follows its owner.
 				[`${NS}:pet_goals`]: {
 					'minecraft:behavior.stay_while_sitting': { priority: 2 },
 					'minecraft:behavior.follow_owner': { priority: 3, speed_multiplier: 1, start_distance: 5, stop_distance: 1 },
 				},
-				// A bird free to move: walks and flies about, can be pushed, chatters. Later sessions
-				// swap this for a roosting or held group.
+				// A bird free to move: walks and flies about, can be pushed, chatters. The perch script
+				// swaps it for held_body (flying home, or awake on the perch) or asleep_body.
 				[`${NS}:free_body`]: {
 					'minecraft:movement': { value: 0.4 },
 					'minecraft:pushable': { is_pushable: true, is_pushable_by_piston: true },
 					'minecraft:behavior.random_fly': { priority: 4, avoid_damage_blocks: true, can_land_on_trees: true, y_offset: 0, speed_multiplier: 1, xz_dist: 15, y_dist: 1 },
 					'minecraft:ambient_sound_interval': { event_name: 'ambient', value: 4, range: 4 },
+				},
+				// Moved by the script alone (flying home to its perch, sitting on it by day): no
+				// movement of its own, no pushing, no goals; it still chatters, as on Java.
+				[`${NS}:held_body`]: {
+					'minecraft:movement': { value: 0 },
+					'minecraft:pushable': { is_pushable: false, is_pushable_by_piston: false },
+					'minecraft:ambient_sound_interval': { event_name: 'ambient', value: 4, range: 4 },
+				},
+				// Asleep on its perch for the night: held the same way, and quiet until morning.
+				[`${NS}:asleep_body`]: {
+					'minecraft:movement': { value: 0 },
+					'minecraft:pushable': { is_pushable: false, is_pushable_by_piston: false },
 				},
 			},
 			events: {
@@ -97,6 +113,27 @@ function entity(bird) {
 				'minecraft:on_tame': {
 					add: { component_groups: [`${NS}:tame`, `${NS}:pet_goals`] },
 					remove: { component_groups: [`${NS}:wild`] },
+				},
+				[`${NS}:sat`]: { set_property: { [`${NS}:sitting`]: true } },
+				[`${NS}:stood`]: { set_property: { [`${NS}:sitting`]: false } },
+				// The perch script's bodies (src/main.ts). Each takes the others off, so the bird is
+				// always in exactly one of free_body, held_body and asleep_body.
+				[`${NS}:hold`]: {
+					add: { component_groups: [`${NS}:held_body`] },
+					remove: { component_groups: [`${NS}:free_body`, `${NS}:asleep_body`, `${NS}:pet_goals`] },
+				},
+				[`${NS}:sleep`]: {
+					add: { component_groups: [`${NS}:asleep_body`] },
+					remove: { component_groups: [`${NS}:free_body`, `${NS}:held_body`, `${NS}:pet_goals`] },
+				},
+				[`${NS}:release`]: {
+					add: { component_groups: [`${NS}:free_body`, `${NS}:pet_goals`] },
+					remove: { component_groups: [`${NS}:held_body`, `${NS}:asleep_body`] },
+				},
+				// A wild bird found without its free body (it never has a perch): just the body back.
+				[`${NS}:release_wild`]: {
+					add: { component_groups: [`${NS}:free_body`] },
+					remove: { component_groups: [`${NS}:held_body`, `${NS}:asleep_body`] },
 				},
 			},
 		},
@@ -138,12 +175,14 @@ function clientEntity(bird) {
 	};
 	const controllers = [{ pose: `controller.animation.${NS}.pose` }, { extras: `controller.animation.${NS}.extras` }];
 	const pre = [
+		`variable.perched = query.property('${NS}:perched');`,
 		`variable.roosting = query.property('${NS}:roosting');`,
 		`variable.shoulder = query.property('${NS}:shoulder');`,
 		`variable.greeting = query.property('${NS}:greeting');`,
 		`variable.shaking = query.property('${NS}:shaking');`,
-		// 0 flying, 1 standing, 2 sitting (told to, or on a shoulder), 3 asleep on its perch.
-		'variable.state = variable.roosting ? 3 : ((query.is_sitting || variable.shoulder) ? 2 : ((!query.is_on_ground && !query.is_jumping) ? 0 : 1));',
+		// 0 flying, 1 standing, 2 sitting (told to, on its perch by day, or on a shoulder), 3 asleep
+		// on its perch. A bird on its perch is held by the script, never on the ground or flying.
+		'variable.state = variable.roosting ? 3 : ((query.is_sitting || variable.perched || variable.shoulder) ? 2 : ((!query.is_on_ground && !query.is_jumping) ? 0 : 1));',
 		// Java's flap angle: (sin(flap) + 1) * flap speed, in radians. The game's own
 		// query.wing_flap_position and wing_flap_speed stay 0 for add-on mobs (only its parrot and
 		// chicken fill them), so the bird keeps its own, as LittleBird.calculateFlapping does: the
@@ -305,4 +344,95 @@ function animationControllers() {
 	};
 }
 
-module.exports = { NS, entity, spawnRules, clientEntity, renderController, animations, animationControllers };
+// ---------------------------------------------------------------- the perch
+
+// Java's perch (PerchBlock, models/block/perch.json, recipe/perch.json). The model facing north has
+// the bar along x; Java turns it 90 degrees for east and west, and so does the block here. The
+// block state is the way the placer faced (the bird on it faces back at them: src/perch-logic.ts).
+// Its shape, as Java's, is the base, the post and the bar; Bedrock takes one collision box, so it
+// is the base's footprint up to the top of the bar (a bird stands on it at the seat height), and the
+// selection box is the bar's length across. Ambient occlusion 0 is the exponent on the shading:
+// none, as the spike's false (the schema now takes a number).
+function perchBlock() {
+	return {
+		format_version: '1.26.0',
+		'minecraft:block': {
+			description: {
+				identifier: `${NS}:perch`,
+				// Java puts it with the functional blocks; Bedrock's nearest is the items tab.
+				menu_category: { category: 'items' },
+				traits: { 'minecraft:placement_direction': { enabled_states: ['minecraft:cardinal_direction'] } },
+			},
+			components: {
+				'minecraft:geometry': `geometry.${NS}.perch`,
+				'minecraft:material_instances': { '*': { texture: `${NS}_perch`, render_method: 'alpha_test', ambient_occlusion: 0 } },
+				'minecraft:collision_box': { origin: [-3, 0, -3], size: [6, 12, 6] },
+				'minecraft:selection_box': { origin: [-6, 0, -3], size: [12, 12, 6] },
+				// Needs a block under it, like a candle: it goes only on top of a block, and pops off
+				// when that block goes.
+				'minecraft:placement_filter': { conditions: [{ allowed_faces: ['up'] }] },
+				// Java's strength 0.5, wood.
+				'minecraft:destructible_by_mining': { seconds_to_destroy: 0.5 },
+				'minecraft:destructible_by_explosion': { explosion_resistance: 0.5 },
+				'minecraft:light_dampening': 0,
+				'minecraft:map_color': '#8f7748',
+			},
+			permutations: [
+				{
+					condition: "q.block_state('minecraft:cardinal_direction') == 'east' || q.block_state('minecraft:cardinal_direction') == 'west'",
+					components: {
+						'minecraft:transformation': { rotation: [0, 90, 0] },
+						'minecraft:selection_box': { origin: [-3, 0, -6], size: [6, 12, 12] },
+					},
+				},
+			],
+		},
+	};
+}
+
+// Java's shaped recipe as Bedrock's: same pattern and keys (a tag stays a tag), unlocked by what
+// Java's advancement unlocks it with (holding the first ingredient, string).
+function perchRecipe(javaRecipe) {
+	const key = {};
+	for (const [k, v] of Object.entries(javaRecipe.key)) key[k] = v.startsWith('#') ? { tag: v.slice(1) } : { item: v };
+	const first = javaRecipe.pattern.join('').replace(/\s/g, '')[0];
+	return {
+		format_version: '1.20.10',
+		'minecraft:recipe_shaped': {
+			description: { identifier: javaRecipe.result.id },
+			tags: ['crafting_table'],
+			pattern: javaRecipe.pattern,
+			key,
+			unlock: [key[first]],
+			result: { item: javaRecipe.result.id },
+		},
+	};
+}
+
+// A Java block model (elements in 0..16 block space, face uv as [u1, v1, u2, v2]) as Bedrock block
+// geometry (x and z centred on the block, -8..8, y 0..16; per-face uv as a corner and a size). Faces
+// Java leaves out (the post's ends) are left out here too, so they don't render.
+function blockModelToGeo(javaModel, identifier, textureSize = 16) {
+	const cubes = javaModel.elements.map((el) => {
+		if (el.rotation && el.rotation.angle) throw new Error(`${identifier}: rotated elements are not converted`);
+		const uv = {};
+		for (const [face, f] of Object.entries(el.faces)) uv[face] = { uv: [f.uv[0], f.uv[1]], uv_size: [f.uv[2] - f.uv[0], f.uv[3] - f.uv[1]] };
+		return {
+			origin: [el.from[0] - 8, el.from[1], el.from[2] - 8],
+			size: [el.to[0] - el.from[0], el.to[1] - el.from[1], el.to[2] - el.from[2]],
+			uv,
+		};
+	});
+	return {
+		format_version: '1.21.0',
+		'minecraft:geometry': [{
+			description: {
+				identifier, texture_width: textureSize, texture_height: textureSize,
+				visible_bounds_width: 2, visible_bounds_height: 1.5, visible_bounds_offset: [0, 0.75, 0],
+			},
+			bones: [{ name: 'perch', pivot: [0, 0, 0], cubes }],
+		}],
+	};
+}
+
+module.exports = { NS, entity, spawnRules, clientEntity, renderController, animations, animationControllers, perchBlock, perchRecipe, blockModelToGeo };

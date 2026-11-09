@@ -16,7 +16,7 @@ const { birds } = require('./birds.js');
 const packs = require('./packs.js');
 const { convert } = require('./java-model-to-geo.js');
 const { zip } = require('./zip.js');
-const { javaRepo, ASSETS: A, MODELS } = require('./java-source.js');
+const { javaRepo, ASSETS: A, MODELS, DATA } = require('./java-source.js');
 
 const root = path.resolve(__dirname, '..');
 const args = process.argv.slice(2);
@@ -154,6 +154,16 @@ function build() {
 	writeFile(path.join(rp, 'textures', 'blocks', 'perch.png'), java.read(`${A}textures/block/perch.png`));
 	textures++;
 
+	// The perch: the block, its model (converted from Java's block model), texture, sound and recipe.
+	writeJson(path.join(bp, 'blocks', 'perch.json'), packs.perchBlock());
+	writeJson(path.join(bp, 'recipes', 'perch.json'), packs.perchRecipe(JSON.parse(java.text(`${DATA}recipe/perch.json`))));
+	writeJson(path.join(rp, 'models', 'blocks', 'perch.geo.json'), packs.blockModelToGeo(JSON.parse(java.text(`${A}models/block/perch.json`)), `geometry.${NS}.perch`));
+	writeJson(path.join(rp, 'textures', 'terrain_texture.json'), {
+		resource_pack_name: 'little_birds', texture_name: 'atlas.terrain', padding: 8, num_mip_levels: 4,
+		texture_data: { [`${NS}_perch`]: { textures: 'textures/blocks/perch' } },
+	});
+	writeJson(path.join(rp, 'blocks.json'), { format_version: '1.21.40', [`${NS}:perch`]: { sound: 'wood' } });
+
 	// Sounds: every OGG, the definitions, and which ones each bird plays.
 	for (const p of java.list(`${A}sounds/`)) {
 		if (!p.endsWith('.ogg')) continue;
@@ -167,7 +177,10 @@ function build() {
 	}
 	writeJson(path.join(rp, 'sounds', 'sound_definitions.json'), defs);
 	writeJson(path.join(rp, 'sounds.json'), entitySounds());
-	for (const b of birds) if (!defs.sound_definitions[`${NS}.${b.id}_chatter`]) fail(`no ${b.id}_chatter sound in the Java repo`);
+	for (const b of birds) {
+		// The chatter is its ambient sound; the settle sound plays as it settles on its perch for the night.
+		for (const s of ['chatter', 'settle']) if (!defs.sound_definitions[`${NS}.${b.id}_${s}`]) fail(`no ${b.id}_${s} sound in the Java repo`);
+	}
 
 	// Names.
 	writeFile(path.join(rp, 'texts', 'en_US.lang'), lang(JSON.parse(java.text(`${A}lang/en_us.json`))));
