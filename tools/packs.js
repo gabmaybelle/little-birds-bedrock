@@ -29,7 +29,46 @@ function properties(bird) {
 		[`${NS}:shaking`]: { type: 'bool', default: false, client_sync: true },
 	};
 	if (bird.song) p[`${NS}:singing`] = { type: 'bool', default: false, client_sync: true };
+	// A lovebird pair's slot (src/pairs.ts): 0 for none; the follow goal reads it.
+	if (bird.id === 'lovebird') p[`${NS}:pair`] = { type: 'int', range: [0, PAIR_SLOTS], default: 0, client_sync: false };
 	return p;
+}
+
+/** How many pair slots there are; src/pair-logic.ts has the same number and says why. */
+const PAIR_SLOTS = 15;
+/** A chick grows up in 24000 ticks, as on Java. */
+const GROW_UP = 1200;
+/** A chick is drawn and sized at half its parents' size, as Java's young are (ageScale 0.5). */
+const CHICK_SCALE = 0.5;
+
+/**
+ * Keeping close (the Java edition's Lovebird.KeepTogetherGoal and ZebraFinch.KeepCompanyGoal): a
+ * lovebird flies back to its partner (the lovebird with the same pair slot), a finch to the nearest
+ * finch, coming to within 2 blocks; never to one on a shoulder. At the wandering's priority, so the
+ * one doesn't cut the other short.
+ */
+function keepClose(bird) {
+	const notOnShoulder = { test: 'bool_property', subject: 'other', domain: `${NS}:shoulder`, operator: '==', value: false };
+	if (bird.id === 'lovebird') {
+		const sameSlot = [];
+		for (let k = 1; k <= PAIR_SLOTS; k++) {
+			sameSlot.push({ all_of: [
+				{ test: 'int_property', subject: 'self', domain: `${NS}:pair`, operator: '==', value: k },
+				{ test: 'int_property', subject: 'other', domain: `${NS}:pair`, operator: '==', value: k },
+			] });
+		}
+		return { 'minecraft:behavior.follow_mob': {
+			priority: 4, search_range: 16, stop_distance: 2, speed_multiplier: 1, preferred_actor_type: `${NS}:lovebird`,
+			filters: { all_of: [{ test: 'is_family', subject: 'other', value: 'lovebird' }, notOnShoulder, { any_of: sameSlot }] },
+		} };
+	}
+	if (bird.id === 'zebra_finch') {
+		return { 'minecraft:behavior.follow_mob': {
+			priority: 4, search_range: 8, stop_distance: 2, speed_multiplier: 1, preferred_actor_type: `${NS}:zebra_finch`,
+			filters: { all_of: [{ test: 'is_family', subject: 'other', value: 'zebra_finch' }, notOnShoulder] },
+		} };
+	}
+	return {};
 }
 
 /** The bird's collision box on a shoulder; src/shoulder-logic.ts has the same number and says why. */
@@ -65,7 +104,6 @@ function entity(bird) {
 				// own_size, which sets it back, so it is never lost.
 				'minecraft:collision_box': { width: bird.width, height: bird.height },
 				'minecraft:conditional_bandwidth_optimization': {},
-				'minecraft:experience_reward': { on_death: 'query.last_hit_by_player ? Math.Random(1,3) : 0' },
 				'minecraft:game_event_movement_tracking': { emit_flap: true },
 				'minecraft:health': { max: bird.health, value: bird.health },
 				'minecraft:hurt_on_condition': {
@@ -86,6 +124,19 @@ function entity(bird) {
 					'minecraft:despawn': { despawn_from_distance: {} },
 					'minecraft:tameable': { probability: 0.33, tame_items: SEEDS, tame_event: { event: 'minecraft:on_tame', target: 'self' } },
 				},
+				// A grown bird. Breeding is the script's (src/breeding.ts): the game's own breeding didn't
+				// finish with flying birds and can't keep a lovebird to its partner. A chick gives no
+				// experience, as on Java.
+				[`${NS}:adult`]: {
+					'minecraft:experience_reward': { on_death: 'query.last_hit_by_player ? Math.Random(1,3) : 0' },
+				},
+				// A chick: half size, grows up in twenty minutes (seeds hurry it), keeps near a parent.
+				[`${NS}:chick`]: {
+					'minecraft:is_baby': {},
+					'minecraft:scale': { value: CHICK_SCALE },
+					'minecraft:ageable': { duration: GROW_UP, feed_items: SEEDS, grow_up: { event: `${NS}:grown_up`, target: 'self' } },
+					'minecraft:behavior.follow_parent': { priority: 5, speed_multiplier: 1.1 },
+				},
 				[`${NS}:tame`]: {
 					'minecraft:is_tamed': {},
 					'minecraft:sittable': { sit_event: { event: `${NS}:sat`, target: 'self' }, stand_event: { event: `${NS}:stood`, target: 'self' } },
@@ -102,6 +153,7 @@ function entity(bird) {
 					...body,
 					'minecraft:movement': { value: 0.4 },
 					'minecraft:pushable': { is_pushable: true, is_pushable_by_piston: true },
+					...keepClose(bird),
 					'minecraft:behavior.random_fly': { priority: 4, avoid_damage_blocks: true, can_land_on_trees: true, y_offset: 0, speed_multiplier: 1, xz_dist: 15, y_dist: 1 },
 					'minecraft:ambient_sound_interval': { event_name: 'ambient', value: 4, range: 4 },
 				},
@@ -141,7 +193,16 @@ function entity(bird) {
 				// Every new bird (natural spawn, egg, /summon) picks one of its colours at random, as on Java.
 				'minecraft:entity_spawned': {
 					set_property: { [`${NS}:colour`]: `math.random_integer(0, ${bird.colours.length - 1})` },
-					add: { component_groups: [`${NS}:wild`, `${NS}:free_body`] },
+					add: { component_groups: [`${NS}:wild`, `${NS}:free_body`, `${NS}:adult`] },
+				},
+				// A chick from breeding (src/breeding.ts): wild for the moment it takes to tame it to its
+				// parents' owner, free to move; its colour is a parent's, set by the script.
+				[`${NS}:born`]: {
+					add: { component_groups: [`${NS}:chick`, `${NS}:wild`, `${NS}:free_body`] },
+				},
+				[`${NS}:grown_up`]: {
+					remove: { component_groups: [`${NS}:chick`] },
+					add: { component_groups: [`${NS}:adult`] },
 				},
 				'minecraft:on_tame': {
 					add: { component_groups: [`${NS}:tame`, `${NS}:pet_goals`] },

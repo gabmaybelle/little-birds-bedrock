@@ -33,8 +33,9 @@ converted from the Java model classes by `tools/java-model-to-geo.js`, box for b
 ## Checks
 
 - `npm test`: unit tests of the generated files (the models against the Java classes, sizes,
-  colours, health, the component-group rules) and of the perch's rules (`src/perch-logic.ts`:
-  seats, sharing, home and away, calling, the flight home) against the Java edition's.
+  colours, health, the component-group rules) and of the rules in `src/*-logic.ts` (the perch, dusk
+  and the greeting, the shoulder, lovebird pairs and finch company, breeding and chicks, the songs)
+  against the Java edition's.
 - `npm run typecheck`: the scripts against the `@minecraft/server` typings the pack asks for.
 - `npm run validate`: every pack file against Mojang's schemas and the community
   [Blockception schemas](https://github.com/Blockception/Minecraft-bedrock-json-schemas).
@@ -42,8 +43,9 @@ converted from the Java model classes by `tools/java-model-to-geo.js`, box for b
   Bedrock Dedicated Server with no window and runs the self-test pack (`test/`): every bird
   spawns in each of its colours, its spawn egg works, it tames and it flies; and the perch: a
   tamed bird claims one, sleeps on it at night, goes home when its owner is away, is called to
-  it, set down on it, shares it (two finches) or doesn't (two budgies). Running the server means
-  accepting Minecraft's EULA.
+  it, set down on it, shares it (two finches) or doesn't (two budgies); the greeting, dusk and the
+  shoulder; lovebirds pairing and keeping together, finches keeping company, breeding and chicks,
+  and the songs. Running the server means accepting Minecraft's EULA.
 
 ## Licence
 

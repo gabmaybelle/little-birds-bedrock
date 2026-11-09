@@ -648,15 +648,17 @@ perchCase("perch_soak", async () => {
     flock.push(await petBird(["budgie", "cockatiel", "lovebird", "canary"][i % 4], x + 1, z + 1));
   }
   debug(`stand_in owner1 -35 ${GROUND} -45`); // home: within 16 blocks of every perch
-  const onSeatAny = (b: Entity) => perches.some((p) => dist(b.location, seatOf(p)) <= 0.06);
+  // A paired lovebird keeps its side of the bar (0.2 from the middle) even with its partner on another perch, as on Java.
+  const seatDist = (b: Entity, p: Vector3) => Math.min(...[0, 0.2, -0.2].flatMap((al) => [dist(b.location, seatOf(p, al, true)), dist(b.location, seatOf(p, al, false))]));
+  const onSeatAny = (b: Entity) => perches.some((p) => seatDist(b, p) <= 0.06);
   const p0 = (await ask("perf")) as unknown as Perf;
   for (let k = 1; k <= nights; k++) {
     night();
     must(await waitFor(() => flock.every((b) => asleep(b) && onSeatAny(b)), 1200, 20), `night ${k}: ${flock.filter(asleep).length} of ${n} asleep after 60 s`);
     await wait(60);
-    const off = flock.map((b) => Math.min(...perches.map((p) => dist(b.location, seatOf(p, 0, true)) )));
+    const off = flock.map((b) => Math.min(...perches.map((p) => seatDist(b, p))));
     must(Math.max(...off) <= 0.06, `night ${k}: a bird is ${Math.max(...off).toFixed(3)} from any seat`);
-    const seats = new Set(flock.map((b) => perches.findIndex((p) => dist(b.location, seatOf(p)) <= 0.06)));
+    const seats = new Set(flock.map((b) => perches.findIndex((p) => seatDist(b, p) <= 0.06)));
     must(seats.size === n && !seats.has(-1), `night ${k}: ${n} birds on ${seats.size} seats`);
     day();
     // Each gets up after its daytime sit (20 to 60 s); one that is up may go back for a daytime
@@ -670,11 +672,244 @@ perchCase("perch_soak", async () => {
   must(flock.every((b) => b.isValid), `${flock.filter((b) => !b.isValid).length} birds lost`);
   const p1 = (await ask("perf")) as unknown as Perf;
   const tick = { runs: p1.tick.runs - p0.tick.runs, ms: p1.tick.ms - p0.tick.ms }, sec = { runs: p1.second.runs - p0.second.runs, ms: p1.second.ms - p0.second.ms };
-  log(`note perch_soak cost: per tick ${(tick.ms / tick.runs).toFixed(3)} ms mean, ${p1.tick.max} ms worst; once-a-second pass ${(sec.ms / sec.runs).toFixed(2)} ms mean, ${p1.second.max} ms worst (${n} birds, ${nights} nights, ${tick.runs} ticks); greeting watch ${(p1.greeting.ms / Math.max(1, p1.greeting.runs)).toFixed(2)} ms mean, ${p1.greeting.max} ms worst`);
+  log(`note perch_soak cost: per tick ${(tick.ms / tick.runs).toFixed(3)} ms mean, ${p1.tick.max} ms worst; once-a-second pass ${(sec.ms / sec.runs).toFixed(2)} ms mean, ${p1.second.max} ms worst (${n} birds, ${nights} nights, ${tick.runs} ticks); greeting watch ${(p1.greeting.ms / Math.max(1, p1.greeting.runs)).toFixed(2)} ms mean, ${p1.greeting.max} ms worst; pairs ${(p1.pairs.ms / Math.max(1, p1.pairs.runs)).toFixed(2)} ms mean, ${p1.pairs.max} worst; songs ${(p1.songs.ms / Math.max(1, p1.songs.runs)).toFixed(2)} ms mean, ${p1.songs.max} worst`);
   must(p1.tick.max <= 5 && p1.second.max <= 10 && p1.greeting.max <= 5, `over budget: worst tick ${p1.tick.max} ms (budget 5), worst pass ${p1.second.max} ms (budget 10), worst greeting watch ${p1.greeting.max} ms (budget 5)`);
 });
 type Run = { runs: number; ms: number; max: number };
-type Perf = { tick: Run; second: Run; shoulder: Run; greeting: Run };
+type Perf = { tick: Run; second: Run; shoulder: Run; greeting: Run; pairs: Run; songs: Run };
+
+// ---------------------------------------------------------------- pairs, company, chicks, songs (session 5)
+//
+// North of the bird lanes (z 40 to 56), inside the ticking area.
+
+type Bird = State & { partner: string | null; slot: number | null; songs: number; singingPose: boolean; baby: boolean; owner: string | null };
+const birdState = (e: Entity) => ask(`state ${e.id}`) as Promise<Bird>;
+async function states(list: Entity[]): Promise<Bird[]> {
+  const out: Bird[] = [];
+  for (const e of list) out.push(await birdState(e));
+  return out;
+}
+/** Asks after a bird every half second until the test holds; the last state either way. */
+async function waitState(e: Entity, pred: (s: Bird) => boolean, ticks: number): Promise<Bird> {
+  let s = await birdState(e);
+  for (let t = 0; t < ticks && !pred(s); t += 10) {
+    await wait(10);
+    s = await birdState(e);
+  }
+  return s;
+}
+const flat = (a: Vector3, b: Vector3) => Math.hypot(a.x - b.x, a.z - b.z);
+const summonChick = (id: string, x: number, z: number): Entity => {
+  const e = overworld().spawnEntity(`${NS}:${id}`, at(x, z), { spawnEvent: `${NS}:born` });
+  spawned.push(e);
+  return e;
+};
+
+// Two lone grown lovebirds within 8 blocks pair for good, both ways, with the same slot; a third far
+// off and a chick beside them stay on their own.
+perchCase("pair_up", async () => {
+  const a = spawn("lovebird", at(-30, 44)), b = spawn("lovebird", at(-26, 44)), far = spawn("lovebird", at(10, 44));
+  const chick = summonChick("lovebird", -28, 46);
+  let sa = await waitState(a, (x) => x.partner === b.id, 400);
+  let sb = await birdState(b);
+  must(sa.partner === b.id && sb.partner === a.id, `not paired after 20 s: a's partner ${sa?.partner}, b's ${sb?.partner}`);
+  await wait(30);
+  sa = await birdState(a);
+  sb = await birdState(b);
+  must(sa.slot !== null && sa.slot > 0 && sa.slot === sb.slot, `slots ${sa.slot} and ${sb.slot}`);
+  const [sf, sc] = await states([far, chick]);
+  must(sf.partner === null && sf.slot === 0, `the far lovebird paired (${sf.partner})`);
+  must(sc.baby, "the chick is not a chick");
+  must(sc.partner === null, "the chick paired");
+});
+
+// Two pairs side by side carry different slots; a death ends a pair, and the one left pairs again.
+perchCase("pair_slots_death", async () => {
+  const a = spawn("lovebird", at(-20, 48)), b = spawn("lovebird", at(-19, 48));
+  const c = spawn("lovebird", at(-16, 48)), d = spawn("lovebird", at(-15, 48));
+  await ask(`pair ${a.id} ${b.id}`);
+  await ask(`pair ${c.id} ${d.id}`);
+  await wait(50);
+  const s = await states([a, b, c, d]);
+  must(s[0].partner === b.id && s[2].partner === d.id, "the pairs did not hold");
+  must(s[0].slot === s[1].slot && s[2].slot === s[3].slot, `slots ${s.map((x) => x.slot).join(",")}: a pair's two differ`);
+  must(s[0].slot !== s[2].slot && s[0].slot! > 0 && s[2].slot! > 0, `slots ${s.map((x) => x.slot).join(",")}: the two pairs share one`);
+  b.kill();
+  await wait(10);
+  const sa = await birdState(a);
+  must(sa.partner === null && sa.slot === 0, `still paired after its partner died (${sa.partner}, slot ${sa.slot})`);
+  const e = spawn("lovebird", at(-21, 50));
+  const again = await waitState(a, (x) => x.partner === e.id, 400);
+  must(again.partner === e.id, "the widowed lovebird did not pair with a new one in 20 s");
+});
+
+// A lovebird drifted from its partner flies back within 2 to 4 blocks; it passes over another pair.
+perchCase("pair_together", async () => {
+  const a = spawn("lovebird", at(0, 52)), b = spawn("lovebird", at(1, 52));
+  await ask(`pair ${a.id} ${b.id}`);
+  await wait(40);
+  b.teleport(at(12, 52, GROUND + 1));
+  const back = await waitFor(() => a.isValid && b.isValid && flat(a.location, b.location) <= P_TOGETHER, 900, 10);
+  must(back, `still ${flat(a.location, b.location).toFixed(1)} blocks apart after 45 s`);
+});
+const P_TOGETHER = 4.5;
+
+// A finch drifted from the others flies back to the nearest one.
+perchCase("finch_company", async () => {
+  const a = spawn("zebra_finch", at(20, 52)), b = spawn("zebra_finch", at(27, 52));
+  const back = await waitFor(() => a.isValid && b.isValid && flat(a.location, b.location) <= P_TOGETHER, 900, 10);
+  must(back, `still ${flat(a.location, b.location).toFixed(1)} blocks apart after 45 s`);
+});
+
+// A chick: half size and as quick as a grown bird; growing up gives it its full size back.
+perchCase("chick", async () => {
+  const c = summonChick("budgie", -30, 54);
+  await wait(5);
+  const box = c.getAABB();
+  must(c.getComponent("minecraft:is_baby") !== undefined, "not a baby");
+  must(Math.abs(box.extent.x * 2 - 0.2) < 0.03, `chick width ${(box.extent.x * 2).toFixed(2)}, expected 0.2 (half of 0.4)`);
+  must(Math.abs(speed(c) - 0.4) < 1e-6, `a chick's movement ${speed(c)}`);
+  c.triggerEvent(`${NS}:grown_up`);
+  await wait(5);
+  must(c.getComponent("minecraft:is_baby") === undefined, "still a baby after growing up");
+  must(Math.abs(c.getAABB().extent.x * 2 - 0.4) < 0.03, `grown width ${(c.getAABB().extent.x * 2).toFixed(2)}`);
+});
+
+type Breed = Bird & { inLove: boolean; restLeft: number; courting: string | null; chick?: string | null };
+const breedState = (e: Entity) => ask(`state ${e.id}`) as Promise<Breed>;
+const feedBy = async (owner: string, e: Entity) => (await ask(`feed ${owner} ${e.id}`)).acted === true;
+const chicksAround = (id: string, p: Vector3, not: string[]) =>
+  overworld().getEntities({ type: `${NS}:${id}`, location: p, maxDistance: 10 }).filter((e) => e.getComponent("minecraft:is_baby") !== undefined && !not.includes(e.id));
+async function waitChick(id: string, p: Vector3, not: string[], ticks: number): Promise<Entity | undefined> {
+  for (let t = 0; t <= ticks; t += 5) {
+    const c = chicksAround(id, p, not)[0];
+    if (c) {
+      spawned.push(c);
+      return c;
+    }
+    await wait(5);
+  }
+  return undefined;
+}
+
+// Two tamed budgies their owner feeds: in love, they come together, a chick: tamed to their owner,
+// in one parent's colour, free to move. Then both rest; a stranger's seeds do nothing.
+perchCase("breed_budgies", async () => {
+  const a = await petBird("budgie", -20, 50), b = await petBird("budgie", -16, 50);
+  a.setProperty(`${NS}:colour`, 1);
+  b.setProperty(`${NS}:colour`, 3);
+  must(!(await feedBy("owner2", a)), "a stranger's seeds made it fall in love");
+  must(await feedBy("owner1", a), "its owner's seeds did not make it fall in love");
+  must((await breedState(a)).inLove, "not in love after the seeds");
+  must(!(await feedBy("owner1", a)), "fell in love again while in love");
+  must(await feedBy("owner1", b), "the second bird did not fall in love");
+  const chick = await waitChick("budgie", a.location, [a.id, b.id], 200);
+  must(chick, "no chick 10 s after both were fed");
+  await wait(5);
+  must(tamed(chick), "the chick is not tamed");
+  must([1, 3].includes(colour(chick)), `the chick's colour is ${colour(chick)}, not a parent's (1 or 3)`);
+  must(Math.abs(speed(chick) - 0.4) < 1e-6, `the chick's movement ${speed(chick)}`);
+  const s = await breedState(chick);
+  must(s.owner === "owner1", `the chick's owner is ${s.owner}`);
+  const sa = await breedState(a);
+  must(!sa.inLove && sa.restLeft > 5900, `a parent after the chick: in love ${sa.inLove}, resting ${sa.restLeft} ticks`);
+  must(!(await feedBy("owner1", a)), "a resting parent fell in love");
+  must(chicksAround("budgie", a.location, [a.id, b.id]).length === 1, "more than one chick");
+});
+
+// Birds of different kinds don't mate; nor do two lovebirds of different pairs, side by side. Their
+// partners fed too, each pair has its chick. A lovebird on its own doesn't fall in love.
+perchCase("breed_kinds_pairs", async () => {
+  const budgie = await petBird("budgie", 0, 50), cockatiel = await petBird("cockatiel", 1, 50);
+  must(await feedBy("owner1", budgie) && await feedBy("owner1", cockatiel), "not in love");
+  const a = await petBird("lovebird", 10, 50), c = await petBird("lovebird", 11, 50);
+  const b = await petBird("lovebird", 10, 56), d = await petBird("lovebird", 11, 56);
+  await ask(`pair ${a.id} ${b.id}`);
+  await ask(`pair ${c.id} ${d.id}`);
+  const lone = await petBird("lovebird", 40, 40);
+  await wait(5);
+  must(!(await feedBy("owner1", lone)), "a lovebird without a partner fell in love");
+  must(await feedBy("owner1", a) && await feedBy("owner1", c), "a paired lovebird did not fall in love");
+  await wait(120);
+  must(chicksAround("budgie", budgie.location, []).length === 0 && chicksAround("cockatiel", budgie.location, []).length === 0, "a budgie and a cockatiel had a chick");
+  must(chicksAround("lovebird", a.location, []).length === 0, "two lovebirds of different pairs had a chick");
+  must(await feedBy("owner1", b) && await feedBy("owner1", d), "the partners did not fall in love");
+  const parents = [a.id, b.id, c.id, d.id, lone.id];
+  must(await waitChick("lovebird", a.location, parents, 300), "a lovebird and its partner had no chick in 15 s");
+  for (let t = 0; t < 300 && chicksAround("lovebird", a.location, parents).length < 2; t += 10) await wait(10);
+  const chicks = chicksAround("lovebird", a.location, parents);
+  for (const ch of chicks) spawned.push(ch);
+  must(chicks.length === 2, `${chicks.length} lovebird chicks, not one for each pair`);
+  for (const ch of chicks) must((await breedState(ch)).partner === null, "a chick has a partner");
+});
+
+// Getting hurt ends love (vanilla Animal.actuallyHurt).
+perchCase("breed_hurt", async () => {
+  const a = await petBird("canary", 20, 50);
+  must(await feedBy("owner1", a), "not in love");
+  a.applyDamage(1);
+  await wait(5);
+  must(!(await breedState(a)).inLove, "still in love after being hurt");
+});
+
+// A tamed canary sings once each morning: not in the afternoon, once in the morning (the pose on,
+// then off), not again that morning, again the next. A wild canary doesn't.
+perchCase("song_canary", async () => {
+  world.setTimeOfDay(6000);
+  const c = await petBird("canary", 0, 44);
+  const wild = spawn("canary", at(3, 44));
+  await wait(60);
+  must((await birdState(c)).songs === 0, "sang in the afternoon");
+  world.setTimeOfDay(200); // rolls on to the next morning
+  // The pose, read straight off the bird: on within the morning's first 30 s (it sings once it has
+  // landed), held about seven seconds (140 ticks), then off.
+  const pose = () => c.getProperty(`${NS}:singing`) === true;
+  must(await waitFor(pose, 600, 1), `no singing pose in the morning (30 s); tamed ${tamed(c)}, on the ground ${c.isOnGround}`);
+  const from = system.currentTick;
+  must(await waitFor(() => !pose(), 200, 1), "the singing pose is still on after 10 s");
+  const held = system.currentTick - from;
+  must(held >= 130 && held <= 150, `the singing pose held ${held} ticks, not about 140`);
+  let s = await birdState(c);
+  must(s.songs === 1, `sang ${s.songs} times in one morning`);
+  world.setTimeOfDay(100); // an earlier hour rolls on to the morning after
+  s = await waitState(c, (x) => x.songs === 2, 600);
+  must(s.songs === 2, `${s.songs} songs by the next morning, not 2`);
+  must((await birdState(wild)).songs === 0, "the wild canary sang");
+});
+
+// Finches: two tamed ones sitting on their shared perch by day (owner away). One sings; the other
+// answers a moment later, once, and the singer doesn't answer the answer; a wild finch out of
+// hearing stays quiet. A tamed finch whose phrase is due sings it; a wild one doesn't.
+perchCase("song_finches", async () => {
+  const p = placePerch(20, 46);
+  away();
+  const a = await petBird("zebra_finch", 22, 46), b = await petBird("zebra_finch", 18, 46);
+  const far = spawn("zebra_finch", at(36, 46));
+  must(await waitFor(() => perched(a) && perched(b), 600), `not on the perch: ${perched(a)} and ${perched(b)}`);
+  await wait(110); // quiet after any phrase of their own on the way
+  const before = await states([a, b, far]);
+  await ask(`sing ${a.id}`);
+  await wait(50);
+  const after = await states([a, b, far]);
+  must(after[0].songs === before[0].songs + 1, "the finch didn't sing when told");
+  must(after[1].songs === before[1].songs + 1, `the finch beside it answered ${after[1].songs - before[1].songs} times in 2.5 s, not once`);
+  await wait(60);
+  const later = await states([a, b, far]);
+  must(later[0].songs === after[0].songs, "the singer answered the answer");
+  must(later[2].songs === before[2].songs, "a finch 16 blocks off answered");
+  // Its own phrase falls due: the tamed finch sings it.
+  await wait(60);
+  const s0 = (await birdState(b)).songs;
+  await ask(`song_due ${b.id}`);
+  await wait(15);
+  must((await birdState(b)).songs === s0 + 1, "a due phrase was not sung");
+  const w0 = (await birdState(far)).songs;
+  await ask(`song_due ${far.id}`);
+  await wait(15);
+  must((await birdState(far)).songs === w0, "a wild finch sang a phrase of its own");
+  void p;
+});
+
 
 // A server restart with a bird asleep on its perch: run restart_setup, stop the server, start it
 // on the same world (bds-check.js --keep-world), run restart_check. Not in the default run.

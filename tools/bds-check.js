@@ -6,7 +6,7 @@
 // it can't see the models, the animations or hear the sounds (a game client is needed for those).
 //
 //   node tools/bds-check.js <server folder> [--zip <bedrock-server-x.y.z.zip>] [--seconds 1200]
-//        [--port 19240] [--event "little_birds:test spawn_"] [--keep-world]
+//        [--port 19240] [--event "little_birds:test spawn_"] [--keep-world] [--packs <folder>]
 //
 // Run `npm run build` first. Downloading and running the server means you accept Minecraft's EULA.
 'use strict';
@@ -22,7 +22,8 @@ const seconds = parseInt(opt('--seconds', '1200'), 10);
 const port = parseInt(opt('--port', '19240'), 10);
 const event = opt('--event', 'little_birds:test');
 const keepWorld = args.includes('--keep-world');
-const packs = path.join(root, 'build', 'packs');
+// --packs: another folder of bp, rp and bp-test (a test pack of your own in place of the self-test).
+const packs = path.resolve(opt('--packs', path.join(root, 'build', 'packs')));
 if (!fs.existsSync(path.join(packs, 'bp', 'manifest.json'))) { console.error('no build: run npm run build first'); process.exit(2); }
 
 const exe = path.join(folder, process.platform === 'win32' ? 'bedrock_server.exe' : 'bedrock_server');

@@ -13,6 +13,11 @@
 //                                                        that owner sneak-uses the bird with an empty hand (plain: no sneak)
 //   little_birds:debug owner_travelled <owner id>        that owner changed worlds (move the stand-in first)
 //   little_birds:debug owner_gone <owner id>             that owner died or left
+//   little_birds:debug sing <bird id>                    the bird sings now (a finch's phrase calls for answers)
+//   little_birds:debug song_due <bird id>                a finch's own phrase falls due now
+//   little_birds:debug feed <owner id> <bird id>         that owner feeds the bird seeds
+//   little_birds:debug hatch <bird id> <bird id>         those two have a chick now (replies with its id)
+//   little_birds:debug pair <bird id> <bird id>          make two lovebirds a pair
 //   little_birds:debug state <bird id>                   replies with what this pack knows of the bird
 //   little_birds:debug perf                              replies with what the perch's loops cost (ms)
 //
@@ -21,6 +26,9 @@ import { world, system, Direction } from "@minecraft/server";
 import { NS, addPerch, blockUse, debugState, ownerIdOf, perchList, perf, standIns } from "./perch.js";
 import { birdUseAction, debugShoulder, ownerGone, ownerTravelled, shoulderPerf } from "./shoulder.js";
 import { debugGreeting, greetingPerf } from "./greeting.js";
+import { debugPair, pairPerf, pairUp } from "./pairs.js";
+import { debugSongs, finchSings, sing, songDueNow, songPerf } from "./songs.js";
+import { debugBreeding, feed, hatch } from "./breeding.js";
 
 const reply = (o: object) => system.sendScriptEvent(`${NS}:debug_reply`, JSON.stringify(o));
 const overworld = () => world.getDimension("minecraft:overworld");
@@ -57,8 +65,28 @@ function run(message: string) {
   } else if (cmd === "owner_gone") {
     ownerGone(a[0]);
     reply({ cmd: "owner_gone" });
+  } else if (cmd === "sing") {
+    const bird = world.getEntity(a[0]);
+    if (bird?.typeId === `${NS}:zebra_finch`) finchSings(bird);
+    else if (bird) sing(bird);
+    reply({ cmd: "sing" });
+  } else if (cmd === "song_due") {
+    const bird = world.getEntity(a[0]);
+    if (bird) songDueNow(bird);
+    reply({ cmd: "song_due" });
+  } else if (cmd === "feed") {
+    const bird = world.getEntity(a[1]);
+    reply({ cmd: "feed", acted: !!bird && feed({ id: a[0], player: world.getAllPlayers().find((p) => p.id === a[0]) }, bird) });
+  } else if (cmd === "hatch") {
+    const x = world.getEntity(a[0]), y = world.getEntity(a[1]);
+    const chick = x && y ? hatch(x, y) : undefined;
+    reply({ cmd: "hatch", chick: chick?.id ?? null });
+  } else if (cmd === "pair") {
+    const x = world.getEntity(a[0]), y = world.getEntity(a[1]);
+    if (x && y) pairUp(x, y, []);
+    reply({ cmd: "pair" });
   } else if (cmd === "perf") {
-    reply({ cmd: "perf", ...JSON.parse(JSON.stringify(perf)), shoulder: { ...shoulderPerf }, greeting: { ...greetingPerf } });
+    reply({ cmd: "perf", ...JSON.parse(JSON.stringify(perf)), shoulder: { ...shoulderPerf }, greeting: { ...greetingPerf }, pairs: { ...pairPerf }, songs: { ...songPerf } });
   } else if (cmd === "state") {
     const bird = world.getEntity(a[0]);
     reply({
@@ -72,6 +100,10 @@ function run(message: string) {
       shoulder: debugShoulder(a[0]),
       greetingPose: bird?.isValid ? bird.getProperty(`${NS}:greeting`) === true : false,
       ...(bird?.isValid ? debugGreeting(bird) : {}),
+      ...(bird?.isValid ? debugPair(bird) : {}),
+      ...(bird?.isValid ? debugSongs(bird) : {}),
+      ...(bird?.isValid ? debugBreeding(bird) : {}),
+      baby: bird?.isValid ? bird.getComponent("minecraft:is_baby") !== undefined : false,
       dimension: bird?.isValid ? bird.dimension.id : null,
       perches: perchList().length,
     });

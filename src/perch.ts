@@ -26,9 +26,9 @@ const FAMILY = "little_bird";
 
 // Kept on each bird (dynamic properties: saved with it, this pack's own).
 const P_PERCH = `${NS}:perch`; // "dimension|x|y|z"
-const P_OWNER = `${NS}:owner`; // the player's id
+export const P_OWNER = `${NS}:owner`; // the player's id
 const P_MODE = `${NS}:mode`; // free | homing | perched
-const P_PARTNER = `${NS}:partner`; // a lovebird's partner's id (lovebird pairs set it)
+export const P_PARTNER = `${NS}:partner`; // a lovebird's partner's id (pairs.ts sets it)
 // Kept on the world: the perches players have placed, so a bird looking for one needn't scan blocks.
 const W_PERCHES = `${NS}:perches`;
 

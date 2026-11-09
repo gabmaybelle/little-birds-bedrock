@@ -200,6 +200,84 @@ Checks after session 4:
   single tick against the 5 ms budget, while its averages were unchanged.
   Wild flocks: as in session 3, a fresh flock sometimes waits for the second try before flying.
 
+**Pairs, company, songs, breeding and chicks (2026-11-09, session 5).** Java's `Lovebird` pairs,
+`ZebraFinch` company and songs, `Canary`'s morning song, and `LittleBird`'s breeding and chicks, on
+Bedrock. The rules are in `src/pair-logic.ts`, `src/breed-logic.ts` and `src/song-logic.ts` (no game
+objects, so the unit tests run them); `src/pairs.ts`, `src/breeding.ts` and `src/songs.ts` apply them.
+
+- Lovebird pairs: two grown lovebirds without partners within 8 blocks of each other pair for good
+  (about once a second and a half each looks, as on Java), both ways. A pair keeps together: one
+  that drifts off flies back to within 2 blocks of its partner, never to a partner on a shoulder.
+  A pair shares a perch side by side (session 3) and breeds only together. A partner's death ends
+  the pair, and the one left pairs again. Chicks pair once grown.
+- Finch company: a finch keeps near the other finches, flying back to within 2 blocks of one.
+- Breeding: seeds from its owner put a tamed grown bird in love for 30 seconds, with hearts (one seed
+  eaten, none in Creative). Two in love of a kind within 8 blocks come together, and after 3 seconds
+  within 3 blocks a chick appears beside them. Both parents then rest 5 minutes. A lovebird falls
+  in love only once it has a partner, and mates only with its partner. Someone else's bird, a wild
+  bird (seeds tame it), a chick, a bird already in love or resting: no love. Getting hurt ends it.
+- Chicks: half size (as Java's young), tamed to the parents' owner and following them, in one
+  parent's colour at random; they grow up in twenty minutes, sooner for seeds, keep near a parent,
+  and don't ride a shoulder (session 4). They give no experience.
+- The canary's song: once each morning (the first three hours after sunrise), a tamed, grown canary
+  that is awake and on its feet or its perch sings its song from where it sits, with its singing
+  pose (head up, beak going, tail flicking) for seven seconds. Once a morning, saved with the bird.
+- The finch's song: by day a tamed finch on its feet or perch sings a short phrase every 20 to 60
+  seconds; finches within 8 blocks (tamed or wild) answer a second or two later, so two or three
+  keep up a little back-and-forth. An answer calls for no answers; a finch just after a phrase
+  doesn't answer for 5 seconds; an answer waits up to 5 seconds for a finch to land, then is dropped.
+
+Looked at in the game (2026-11-09, 1.26.63): breeding from a player's own seeds, the chicks,
+lovebird pairs, finch phrases and the canary's song all work, and sound right.
+
+Differences from Java, each because Bedrock can't do it the Java way:
+- Breeding is the script's, not the game's breedable component. With it, two fed budgies fell in
+  love and came close, but one climbed far above the other and they never finished (fly navigation),
+  and it can't keep a lovebird to its partner. So courting birds close in by the script's straight
+  glide, as the flight home does, rather than by path-finding; and breeding gives no experience
+  (Java drops 1 to 7).
+- Keeping together and keeping company are the game's follow goal. It follows by path-finding as
+  Java does, but whenever the bird isn't wandering, not only once it has drifted past 4 blocks; a
+  finch follows a finch within reach rather than strictly the nearest. A lovebird's follow goal can
+  only tell its partner by a number the pair shares (one of 15, none shared with a pair nearby).
+- Wild birds despawn on Bedrock (session 2); a wild lovebird whose partner despawned waits for it
+  as a Java lovebird waits for an unloaded one.
+- A finch's wait for its next phrase starts afresh when it is loaded (Java saves it).
+
+Checks after session 5:
+- `npm test`: 45 unit tests (12 new). Pairs: Java's reach (8), keep-together (4, to 2) and the
+  pair-up chance; the nearest lone grown lovebird pairs, not a paired one, a chick or one beyond the
+  box; slots no pair nearby has, and only one of two meeting pairs moves; the follow goals (partner
+  only by slot, finches, never to a shoulder bird, free birds only). Breeding: vanilla's numbers;
+  who falls in love (owner, tamed, grown, not in love or resting, a lovebird only paired); who mates
+  (in love, same kind, within 8; a lovebird only with its partner); a chick after 60 ticks within 3;
+  the courting step; the chick's colour and owner (Java's getBreedOffspring); the chick body, growing
+  up, and no breedable component left. Songs: Java's numbers; the canary once each morning and only
+  tamed, grown, awake and settled; the finch's phrases, answers, quiet and patience.
+- `npm run typecheck`: clean. `npm run validate`: 43 files, no errors (13 known schema lags).
+- Self-test: 48 cases on each server (10 new) and the restart check, on 1.26.63.1 and Preview
+  1.26.70.23. Pairs: two lone lovebirds pair within seconds, with the same slot, and a far one and
+  a chick don't; two pairs side by side get different slots; a partner's death ends the pair and
+  the one left pairs again; a lovebird carried 12 blocks off and a finch 7 blocks from another fly
+  back to within 4. Chicks: half size, as quick as a grown bird, full size once grown. Breeding:
+  a stranger's seeds do nothing; the owner's put a bird in love, once; two fed budgies have one
+  chick within 10 s, tamed, the owner's, in a parent's colour, free to move; then both rest. A
+  budgie and a cockatiel don't mate, nor two lovebirds of different pairs side by side; with their
+  partners fed, each pair has its own chick; a lovebird on its own doesn't fall in love; getting
+  hurt ends love. Songs: a tamed canary is quiet in the afternoon, sings once in the morning (the
+  pose held 7 s), not again that morning, again the next; a wild one doesn't. Two finches on their
+  shared perch: one sings, the other answers once within 2.5 s, the singer doesn't answer back, a
+  finch 16 blocks off doesn't hear; a tamed finch sings a due phrase, a wild one doesn't.
+  On the final files every case and the restart check pass on both servers, with no error or
+  warning lines, except the soak's worst-moment budget: its nights all pass, but its single worst
+  tick and pass go over now and then. The same soak on session 4's code, run on the same PC the
+  same hour, did the same (one run at 5 and 10 ms, the next 8 and 16 ms), and one run of the new
+  code matched that baseline (0.36 ms a tick and 1.43 ms a pass on average, worst 3 and 6 ms). The
+  new pairs and songs loops cost 0.1 to 0.3 ms a second on average. So the budget is noisy here,
+  not broken by this session; the averages are the measure to watch.
+- A local simulated-player check: a chick hatched with a real player as owner is tamed to them and
+  follows them. It also showed the game's own breeding failing with these birds (see above).
+
 ## Next
 
-1. Session 5: lovebird pairs, finch company, songs; breeding and chicks.
+1. Session 6: millet spray, snacks, refused foods; the settings form.
