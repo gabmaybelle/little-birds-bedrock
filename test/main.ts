@@ -166,7 +166,7 @@ BIRDS.forEach((b, i) => {
 
 const PERCH = `${NS}:perch`;
 const debug = (cmd: string) => system.sendScriptEvent(`${NS}:debug`, cmd);
-type State = { mode: string; perch: string | null; owner: string | null; active: string; valid: boolean; acted?: boolean };
+type State = { mode: string; perch: string | null; owner: string | null; active: string; valid: boolean; acted?: boolean; perches: number };
 let replies: ((r: State & { cmd: string; id?: string }) => void)[] = [];
 system.afterEvents.scriptEventReceive.subscribe((ev) => {
   if (ev.id !== `${NS}:debug_reply`) return;
@@ -388,8 +388,122 @@ perchCase("perch_set_down", async () => {
   must(dist(c.location, { x: ground.x + 0.5, y: GROUND, z: ground.z + 0.5 }) < 0.6, `not set down on the block (${dist(c.location, { x: ground.x + 0.5, y: GROUND, z: ground.z + 0.5 }).toFixed(2)} off)`);
 });
 
+// A sleeping bird's chunk unloads and loads again: still asleep, on its seat, watched again.
+perchCase("perch_chunk_unload", async () => {
+  const d = overworld();
+  d.runCommand("tickingarea add circle 400 -60 0 1 lbfar");
+  try {
+    await wait(60);
+    const p = placePerch(400, 0);
+    away();
+    const b = await petBird("budgie", 402, 0);
+    b.addTag("lb_unload");
+    night();
+    must(await waitFor(() => onSeat(b, p) && asleep(b), 600), "never roosted");
+    d.runCommand("tickingarea remove lbfar");
+    must(await waitFor(() => !b.isValid, 400), "the chunk did not unload (the bird is still there), so this proves nothing");
+    d.runCommand("tickingarea add circle 400 -60 0 1 lbfar");
+    let back: Entity | undefined;
+    must(await waitFor(() => (back = d.getEntities({ tags: ["lb_unload"] })[0]) !== undefined, 400), "the bird did not come back with its chunk");
+    spawned.push(back!);
+    must(await waitFor(() => onSeat(back!, p) && asleep(back!), 60), `back ${dist(back!.location, seatOf(p)).toFixed(3)} from the seat, asleep ${asleep(back!)}`);
+    await wait(60);
+    must(onSeat(back!, p, 0.05), "drifted off the seat after the reload");
+    const s = await ask(`state ${back!.id}`);
+    must(s.active.startsWith("perched"), `not watched again after the reload (${s.active})`);
+  } finally {
+    try {
+      d.runCommand("tickingarea remove lbfar");
+    } catch {
+      /* already gone */
+    }
+  }
+});
+
+// Many birds, several nights: every bird home each night on its own perch, up each morning, none
+// lost, and what the perch's script costs measured (budget: 5 ms worst tick, 10 ms worst pass).
+perchCase("perch_soak", async () => {
+  const n = 16, nights = 3, perches: Vector3[] = [], flock: Entity[] = [];
+  const facings = ["north", "south", "east", "west"];
+  for (let i = 0; i < n; i++) {
+    const x = -40 + 3 * (i % 4), z = -50 + 3 * Math.floor(i / 4);
+    perches.push(placePerch(x, z, facings[i % 4]));
+    flock.push(await petBird(["budgie", "cockatiel", "lovebird", "canary"][i % 4], x + 1, z + 1));
+  }
+  debug(`stand_in owner1 -35 ${GROUND} -45`); // home: within 16 blocks of every perch
+  const onSeatAny = (b: Entity) => perches.some((p) => dist(b.location, seatOf(p)) <= 0.06);
+  const p0 = (await ask("perf")) as unknown as Perf;
+  for (let k = 1; k <= nights; k++) {
+    night();
+    must(await waitFor(() => flock.every((b) => asleep(b) && onSeatAny(b)), 1200, 20), `night ${k}: ${flock.filter(asleep).length} of ${n} asleep after 60 s`);
+    await wait(60);
+    const off = flock.map((b) => Math.min(...perches.map((p) => dist(b.location, seatOf(p, 0, true)) )));
+    must(Math.max(...off) <= 0.06, `night ${k}: a bird is ${Math.max(...off).toFixed(3)} from any seat`);
+    const seats = new Set(flock.map((b) => perches.findIndex((p) => dist(b.location, seatOf(p)) <= 0.06)));
+    must(seats.size === n && !seats.has(-1), `night ${k}: ${n} birds on ${seats.size} seats`);
+    day();
+    // Each gets up after its daytime sit (20 to 60 s); one that is up may go back for a daytime
+    // visit (about once a minute, as on Java), so each is watched for having been up at all.
+    const up = new Set<string>();
+    must(await waitFor(() => {
+      for (const b of flock) if (!perched(b)) up.add(b.id);
+      return up.size === n;
+    }, 1400, 20), `morning ${k}: ${n - up.size} never got up in 70 s`);
+  }
+  must(flock.every((b) => b.isValid), `${flock.filter((b) => !b.isValid).length} birds lost`);
+  const p1 = (await ask("perf")) as unknown as Perf;
+  const tick = { runs: p1.tick.runs - p0.tick.runs, ms: p1.tick.ms - p0.tick.ms }, sec = { runs: p1.second.runs - p0.second.runs, ms: p1.second.ms - p0.second.ms };
+  log(`note perch_soak cost: per tick ${(tick.ms / tick.runs).toFixed(3)} ms mean, ${p1.tick.max} ms worst; once-a-second pass ${(sec.ms / sec.runs).toFixed(2)} ms mean, ${p1.second.max} ms worst (${n} birds, ${nights} nights, ${tick.runs} ticks)`);
+  must(p1.tick.max <= 5 && p1.second.max <= 10, `over budget: worst tick ${p1.tick.max} ms (budget 5), worst pass ${p1.second.max} ms (budget 10)`);
+});
+type Perf = { tick: { runs: number; ms: number; max: number }; second: { runs: number; ms: number; max: number } };
+
+// A server restart with a bird asleep on its perch: run restart_setup, stop the server, start it
+// on the same world (bds-check.js --keep-world), run restart_check. Not in the default run.
+const RESTART_PERCH = { x: 0, y: GROUND, z: -45 };
+cases.push({
+  name: "restart_setup",
+  run: async () => {
+    world.gameRules.doDayLightCycle = false;
+    for (const old of overworld().getEntities({ tags: ["lb_restart"] })) old.remove();
+    overworld().getBlock(RESTART_PERCH)!.setPermutation(BlockPermutation.resolve(PERCH, { "minecraft:cardinal_direction": "west" }));
+    debug(`perch_added ${RESTART_PERCH.x} ${RESTART_PERCH.y} ${RESTART_PERCH.z}`);
+    const b = overworld().spawnEntity(`${NS}:lovebird`, { x: 2.5, y: GROUND, z: -44.5 });
+    b.addTag("lb_restart");
+    b.triggerEvent("minecraft:on_tame");
+    await wait(2);
+    debug(`own ${b.id} owner1`);
+    night();
+    must(await waitFor(() => onSeat(b, RESTART_PERCH) && asleep(b), 600), "never roosted");
+  },
+});
+cases.push({
+  name: "restart_check",
+  run: async () => {
+    let b: Entity | undefined;
+    try {
+      must(await waitFor(() => (b = overworld().getEntities({ tags: ["lb_restart"] })[0]) !== undefined, 200), "the bird is not in the world after the restart");
+      must(overworld().getBlock(RESTART_PERCH)?.typeId === PERCH, "the perch is gone after the restart");
+      const s = await ask(`state ${b!.id}`);
+      must(s.owner === "owner1" && s.perch !== null && s.perch.endsWith(`|${RESTART_PERCH.x}|${RESTART_PERCH.y}|${RESTART_PERCH.z}`), `forgot its owner or perch: ${JSON.stringify(s)}`);
+      must(s.perches >= 1, "the world's list of perches is empty after the restart");
+      must(await waitFor(() => onSeat(b!, RESTART_PERCH) && asleep(b!), 60), `after the restart: ${dist(b!.location, seatOf(RESTART_PERCH)).toFixed(3)} from the seat, asleep ${asleep(b!)}`);
+      must(yawGap(b!.getRotation().y, -90) < 1, `faces yaw ${b!.getRotation().y.toFixed(1)}, a west-placed perch faces -90`);
+      await wait(60);
+      must(onSeat(b!, RESTART_PERCH, 0.05), "drifted off the seat after the restart");
+      day();
+      must(await waitFor(() => perched(b!) && !asleep(b!), 60), "not awake on its perch in the morning (its owner is away)");
+    } finally {
+      b?.remove();
+      overworld().getBlock(RESTART_PERCH)?.setType("minecraft:air");
+      day();
+    }
+  },
+});
+
 async function runCases(filter: string) {
-  const chosen = cases.filter((c) => !filter || c.name.startsWith(filter));
+  // The restart cases run only when asked for by name (they span a server restart).
+  const chosen = cases.filter((c) => (filter ? c.name.startsWith(filter) : !c.name.startsWith("restart_")));
   log(`start (${chosen.length} cases)`);
   let failed = 0;
   // One case at a time. (Run side by side, the five fly cases twice left one kind of bird on the

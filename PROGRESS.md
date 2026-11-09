@@ -94,7 +94,8 @@ Checks, all passing (after session 3):
 - `npm run validate`: 43 files, no errors against Mojang's and the community schemas (13 known
   schema lags, each explained in `tools/validate.js`). Breaking a client entity, a model and a
   render controller on purpose makes it fail, so it does catch resource-pack mistakes.
-- Self-test on Bedrock Dedicated Server 1.26.63.1 and Preview 1.26.70.23, 29 cases each. The
+- Self-test on Bedrock Dedicated Server 1.26.63.1 and Preview 1.26.70.23, 31 cases each, and a
+  restart check (two more cases across a server restart). The
   birds: for each, 30 wild birds show every colour and only those; health, flying and taming
   components are right; the spawn egg is a known item and `/summon` works; the tame event tames it
   and keeps its colour; wild birds take to the air. The perch: it places facing each of the four
@@ -105,16 +106,24 @@ Checks, all passing (after session 3):
   budgies, one perch: one sleeps on it; two finches share it at -0.2 and 0.2 along the bar and a
   third doesn't fit; a call by the owner brings the bird to the seat and it stays a while, a
   stranger's call does nothing; a shoulder bird goes onto a used perch, and a sneak-use on the
-  ground sets one down there. No error or warning lines in the server log or content log.
+  ground sets one down there; a sleeping bird's chunk unloads and loads again and it is still
+  asleep on its seat and watched again; 16 birds on 16 perches for three nights: all asleep on
+  their own seats each night, all up each morning, none lost, and the perch script's cost inside
+  its budget (per tick about 0.4 ms on average, 3 to 5 ms at worst; the once-a-second pass about
+  1.4 ms, 4 to 5 ms at worst). Across a server restart a lovebird asleep on a west-facing perch is
+  still there, still owned, still home, asleep on the seat facing -90, and awake on it in the
+  morning. No error or warning lines in the server log or content log.
   On 1.26.63.1 a freshly spawned wild flock sometimes sits perfectly still: it is being ticked
   (a push lifts it) but its wandering doesn't start for the whole 15 s, while a fresh flock flies
-  at once. The fly check nudges and retries, and prints a note when it needed the second try. Not
-  seen on Preview, nor in this session's runs. Worth watching for in the game: wild birds that
-  stand still for a long time.
+  at once. The fly check nudges and retries, and prints a note when it needed the second try.
+  Session 3's last Preview run showed it too (two flocks, each flew on the second try), so it is
+  not only the release. Worth watching for in the game: wild birds that stand still for a long time.
 
 ## Next
 
-1. A look at the perch in the game: the block (shape, texture, it faces you, recipe), a bird
-   landing on the bar and facing you, asleep on it at night, awake on it with you away, called to
-   it by day, two finches side by side, and the flight home.
+1. A look at the perch in the game. Already seen in pictures from the game (1.26.63): the perch's
+   shape and texture; birds on it face back toward where the placer stood (north and east
+   perches); two finches side by side; the finches asleep with their heads tucked. Still to see:
+   placing it and the recipe, a bird landing, the budgie's pose on the bar (it stands taller than
+   the finches), calling it by day, and the flight home.
 2. Session 4: greeting, dusk, shoulder (with portals, logout, death), the first-roost message.

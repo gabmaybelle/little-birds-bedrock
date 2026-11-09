@@ -148,6 +148,17 @@ interface Active {
   asleep: boolean;
 }
 const active = new Map<string, Active>();
+
+/** What the two loops cost, in milliseconds (the self-test's budget reads it). */
+export const perf = { tick: { runs: 0, ms: 0, max: 0 }, second: { runs: 0, ms: 0, max: 0 } };
+function timed(p: { runs: number; ms: number; max: number }, fn: () => void) {
+  const t = Date.now();
+  fn();
+  const ms = Date.now() - t;
+  p.runs++;
+  p.ms += ms;
+  if (ms > p.max) p.max = ms;
+}
 /** Called to its perch and not yet gone (Java's LittleBird.called). */
 const called = new Set<string>();
 
@@ -252,7 +263,7 @@ function tickActive(a: Active) {
   bird.teleport(step.to, { rotation: { x: 0, y: step.yaw } });
 }
 
-system.runInterval(() => {
+system.runInterval(() => timed(perf.tick, () => {
   for (const [id, a] of active) {
     if (!a.bird.isValid) {
       // Unloaded with its chunk, or gone: the once-a-second pass picks it up again when it's back.
@@ -265,7 +276,7 @@ system.runInterval(() => {
       console.warn(`Little Birds: perch: ${e}`);
     }
   }
-}, 1);
+}), 1);
 
 // ---------------------------------------------------------------- once a second: every bird
 
@@ -378,7 +389,7 @@ function tickBird(bird: Entity, me: BirdInfo, pass: Pass) {
   setAsleep(a, pass.night);
 }
 
-system.runInterval(() => {
+system.runInterval(() => timed(perf.second, () => {
   const players = new Map(world.getAllPlayers().map((p) => [p.id, p] as [string, Player]));
   const night = isNight(world.getTimeOfDay());
   for (const dimension of allDimensions()) {
@@ -400,7 +411,7 @@ system.runInterval(() => {
       }
     });
   }
-}, 20);
+}), 20);
 
 // ---------------------------------------------------------------- using a perch, setting down
 

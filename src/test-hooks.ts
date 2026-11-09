@@ -9,10 +9,11 @@
 //   little_birds:debug use <owner id> <x> <y> <z> [sneak] [face]
 //                                                        that owner uses the block with an empty hand
 //   little_birds:debug state <bird id>                   replies with what this pack knows of the bird
+//   little_birds:debug perf                              replies with what the perch's loops cost (ms)
 //
 // Replies come back as /scriptevent little_birds:debug_reply <json>.
 import { world, system, Direction } from "@minecraft/server";
-import { NS, addPerch, blockUse, debugState, ownerIdOf, perchList, standIns } from "./perch.js";
+import { NS, addPerch, blockUse, debugState, ownerIdOf, perchList, perf, standIns } from "./perch.js";
 
 const reply = (o: object) => system.sendScriptEvent(`${NS}:debug_reply`, JSON.stringify(o));
 const overworld = () => world.getDimension("minecraft:overworld");
@@ -35,6 +36,8 @@ function run(message: string) {
     const act = block && blockUse({ id: ownerId, dimension: overworld(), location: at, sneaking: sneak, emptyHand: true }, block, face);
     if (act) act();
     reply({ cmd: "use", acted: !!act });
+  } else if (cmd === "perf") {
+    reply({ cmd: "perf", ...JSON.parse(JSON.stringify(perf)) });
   } else if (cmd === "state") {
     const bird = world.getEntity(a[0]);
     reply({

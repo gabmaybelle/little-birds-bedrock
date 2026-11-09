@@ -5,8 +5,8 @@
 // It proves the manifests, the JSON and the scripts load and that the birds spawn, tame and fly;
 // it can't see the models, the animations or hear the sounds (a game client is needed for those).
 //
-//   node tools/bds-check.js <server folder> [--zip <bedrock-server-x.y.z.zip>] [--seconds 900]
-//        [--port 19240] [--event "little_birds:test spawn_"]
+//   node tools/bds-check.js <server folder> [--zip <bedrock-server-x.y.z.zip>] [--seconds 1200]
+//        [--port 19240] [--event "little_birds:test spawn_"] [--keep-world]
 //
 // Run `npm run build` first. Downloading and running the server means you accept Minecraft's EULA.
 'use strict';
@@ -18,9 +18,10 @@ if (!args[0] || args[0].startsWith('--')) { console.error('usage: node tools/bds
 const folder = path.resolve(args[0]);
 const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
 const zip = opt('--zip', null);
-const seconds = parseInt(opt('--seconds', '900'), 10);
+const seconds = parseInt(opt('--seconds', '1200'), 10);
 const port = parseInt(opt('--port', '19240'), 10);
 const event = opt('--event', 'little_birds:test');
+const keepWorld = args.includes('--keep-world');
 const packs = path.join(root, 'build', 'packs');
 if (!fs.existsSync(path.join(packs, 'bp', 'manifest.json'))) { console.error('no build: run npm run build first'); process.exit(2); }
 
@@ -41,7 +42,8 @@ const header = (p) => JSON.parse(fs.readFileSync(path.join(packs, p, 'manifest.j
 
 const level = 'lbcheck';
 const world = path.join(folder, 'worlds', level);
-fs.rmSync(world, { recursive: true, force: true });
+// --keep-world starts the server on the last run's world (the restart check: restart_setup, then restart_check).
+if (!keepWorld) fs.rmSync(world, { recursive: true, force: true });
 fs.mkdirSync(world, { recursive: true });
 const ref = (h) => ({ pack_id: h.uuid, version: h.version });
 fs.writeFileSync(path.join(world, 'world_behavior_packs.json'), JSON.stringify([ref(header('bp')), ref(header('bp-test'))], null, 2));
@@ -70,7 +72,8 @@ const onData = (d) => {
 	if (!started && /Server started/.test(all)) {
 		started = true;
 		// Keep the middle of the flat world loaded and ticking with no player on, then run the test.
-		setTimeout(() => send('tickingarea add circle 0 -60 0 4 lbtest'), 2000);
+		// A kept world still has its ticking area (adding it again is an error line).
+		if (!keepWorld) setTimeout(() => send('tickingarea add circle 0 -60 0 4 lbtest'), 2000);
 		setTimeout(() => send('scriptevent ' + event), 6000);
 	}
 	if (!done && /LB TEST: DONE/.test(all)) { done = true; setTimeout(stop, 2000); }
