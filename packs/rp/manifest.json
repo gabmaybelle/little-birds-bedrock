@@ -1,0 +1,22 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Little Birds",
+    "description": "Little pet birds that make a perch their own. Resource pack.",
+    "uuid": "457c9027-f607-4a94-b630-f054a7695841",
+    "version": [0, 1, 0],
+    "min_engine_version": [1, 26, 0]
+  },
+  "modules": [
+    {
+      "type": "resources",
+      "uuid": "5b1215f4-08fe-4517-87a7-3ca465de1e82",
+      "version": [0, 1, 0]
+    }
+  ],
+  "metadata": {
+    "authors": ["Gabby"],
+    "license": "MIT",
+    "url": "https://github.com/gabmaybelle/little-birds-bedrock"
+  }
+}

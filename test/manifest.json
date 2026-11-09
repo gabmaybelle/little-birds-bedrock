@@ -1,0 +1,25 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Little Birds self-test",
+    "description": "Test-only pack for a throwaway test world: runs the checklist on /scriptevent little_birds:test. Never for a real world.",
+    "uuid": "05196e09-6e1e-45f6-8171-60141b66ab60",
+    "version": [0, 1, 0],
+    "min_engine_version": [1, 26, 0]
+  },
+  "modules": [
+    {
+      "type": "script",
+      "language": "javascript",
+      "uuid": "15ebfb9c-1d89-4bdc-8051-dcdf3ca715e5",
+      "version": [0, 1, 0],
+      "entry": "scripts/main.js"
+    }
+  ],
+  "dependencies": [
+    {
+      "module_name": "@minecraft/server",
+      "version": "2.10.0"
+    }
+  ]
+}

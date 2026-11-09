@@ -1,0 +1,39 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Little Birds",
+    "description": "Little pet birds that make a perch their own. Behaviour pack.",
+    "uuid": "b09ba6db-8184-4d24-80b0-66c41214dc9c",
+    "version": [0, 1, 0],
+    "min_engine_version": [1, 26, 0]
+  },
+  "modules": [
+    {
+      "type": "data",
+      "uuid": "12a80e7c-c238-4b00-8612-fe7a86ea3611",
+      "version": [0, 1, 0]
+    },
+    {
+      "type": "script",
+      "language": "javascript",
+      "uuid": "e01e70b7-663b-4793-9205-538ea6956ac6",
+      "version": [0, 1, 0],
+      "entry": "scripts/main.js"
+    }
+  ],
+  "dependencies": [
+    {
+      "module_name": "@minecraft/server",
+      "version": "2.10.0"
+    },
+    {
+      "uuid": "457c9027-f607-4a94-b630-f054a7695841",
+      "version": [0, 1, 0]
+    }
+  ],
+  "metadata": {
+    "authors": ["Gabby"],
+    "license": "MIT",
+    "url": "https://github.com/gabmaybelle/little-birds-bedrock"
+  }
+}
