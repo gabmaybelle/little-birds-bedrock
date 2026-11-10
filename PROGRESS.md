@@ -384,8 +384,15 @@ errors (13 known schema lags). Self-test on Bedrock Dedicated Server 1.26.63.1 a
 console or the content log, and every wild flock flew on the first try. The soak: 0.44 to 0.45 ms a
 tick and 1.6 to 1.8 ms a once-a-second pass on average, worst moments 5 to 7 ms.
 
-Left for later: once, in Gabby's play, a budgie flew after her with its wings still while another
-flapped; it couldn't be made to happen again, and nothing headless can show it.
+**A sitting bird stays seated (2026-11-09).** In Gabby's play a bird that was sitting
+flew after her with its wings tucked in. Millet in her hand pulled it along: the tempt goal
+(Java's priority 1) outranked staying seated (2), and a bird the game counts as sitting is drawn in
+its sitting pose, as on Java. Now float and panic come first, then staying seated, then the millet,
+the order Bedrock's own cat and parrot use; millet still wins over following and wandering. A
+unit test holds that order. Nothing headless can sit a bird (only a player's use can), so the
+in-game look is the check, and Gabby saw it hold: a sitting budgie stayed put with millet in hand, and once stood it followed, flapping. With the change: 55 unit tests, typecheck and schemas pass; all 56
+self-test cases and the restart check pass on 1.26.63.1 and Preview 1.26.70.23 with no error or
+warning lines (soak 0.44 to 0.55 ms a tick and 2.0 to 2.3 ms a pass on average).
 
 ## Next
 

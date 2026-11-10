@@ -16,6 +16,11 @@ const MILLET = `${NS}:millet_spray`;
 const SNACKS = ['minecraft:carrot', 'minecraft:apple', 'minecraft:melon_slice', 'minecraft:sweet_berries', 'minecraft:glow_berries', 'minecraft:beetroot'];
 /** The event a bird's spawn rules fire: a natural spawn, which src/settings.ts looks at. */
 const SPAWNED_WILD = `${NS}:spawned_wild`;
+// A bird told to sit stays seated through anything but float and panic (priority 0); the millet's
+// pull comes after that. Bedrock runs a lower number first, and a goal only cuts in on a running
+// goal with a higher number.
+const SIT_PRIORITY = 1;
+const TEMPT_PRIORITY = 2;
 
 // ---------------------------------------------------------------- behaviour pack
 
@@ -99,8 +104,10 @@ function entity(bird) {
 			},
 			components: {
 				'minecraft:type_family': { family: ['little_bird', bird.id, 'mob'] },
-				'minecraft:behavior.float': { priority: 1 },
-				'minecraft:behavior.panic': { priority: 1, speed_multiplier: 1.25 },
+				// Float and panic first, then staying seated (pet_goals), then the millet (free_body):
+				// Bedrock's own pets' order. See SIT_PRIORITY.
+				'minecraft:behavior.float': { priority: 0 },
+				'minecraft:behavior.panic': { priority: 0, speed_multiplier: 1.25 },
 				'minecraft:behavior.look_at_player': { priority: 2, look_distance: 8, look_time: { min: 1, max: 2 } },
 				'minecraft:breathable': { suffocate_time: 0, total_supply: 15 },
 				'minecraft:can_fly': {},
@@ -156,7 +163,7 @@ function entity(bird) {
 				},
 				// What a tamed bird does when it is free: sits when told, follows its owner.
 				[`${NS}:pet_goals`]: {
-					'minecraft:behavior.stay_while_sitting': { priority: 2 },
+					'minecraft:behavior.stay_while_sitting': { priority: SIT_PRIORITY },
 					'minecraft:behavior.follow_owner': { priority: 3, speed_multiplier: 1, start_distance: 5, stop_distance: 1 },
 				},
 				// A bird free to move: walks and flies about, can be pushed, chatters. The perch script
@@ -167,10 +174,13 @@ function entity(bird) {
 					'minecraft:movement': { value: 0.4 },
 					'minecraft:pushable': { is_pushable: true, is_pushable_by_piston: true },
 					...keepClose(bird),
-					// Millet in a hand within 10 blocks wins over wandering and following (Java's TemptGoal at
-					// priority 1, its range 10, not scared off). Only a free bird: one on its perch, its
-					// seat for the night, or a shoulder isn't moved by it.
-					'minecraft:behavior.tempt': { priority: 1, speed_multiplier: 1, within_radius: 10, can_tempt_vertically: true, can_get_scared: false, items: [MILLET] },
+					// Millet in a hand within 10 blocks wins over wandering and following (Java's TemptGoal,
+					// its range 10, not scared off). Only a free bird: one on its perch, its seat for the
+					// night, or a shoulder isn't moved by it. Below staying seated, unlike Java's (tempt 1,
+					// sit 2): on Bedrock that let millet pull a bird told to sit, which then flew in its
+					// sitting pose, wings tucked (Gabby saw it, 2026-11-09). Bedrock's cat and parrot put
+					// sitting above food too.
+					'minecraft:behavior.tempt': { priority: TEMPT_PRIORITY, speed_multiplier: 1, within_radius: 10, can_tempt_vertically: true, can_get_scared: false, items: [MILLET] },
 					'minecraft:behavior.random_fly': { priority: 4, avoid_damage_blocks: true, can_land_on_trees: true, y_offset: 0, speed_multiplier: 1, xz_dist: 15, y_dist: 1 },
 					'minecraft:ambient_sound_interval': { event_name: 'ambient', value: 4, range: 4 },
 				},
@@ -639,4 +649,4 @@ function crumbs(snack) {
 	};
 }
 
-module.exports = { NS, MILLET, SNACKS, SEEDS, SPAWNED_WILD, entity, spawnRules, clientEntity, renderController, animations, animationControllers, perchBlock, perchRecipe, blockModelToGeo, milletItem, shapelessRecipe, crumbs };
+module.exports = { NS, SIT_PRIORITY, TEMPT_PRIORITY, MILLET, SNACKS, SEEDS, SPAWNED_WILD, entity, spawnRules, clientEntity, renderController, animations, animationControllers, perchBlock, perchRecipe, blockModelToGeo, milletItem, shapelessRecipe, crumbs };

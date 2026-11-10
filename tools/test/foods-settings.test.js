@@ -114,7 +114,14 @@ test('the entity: millet tempts a free bird, tames a wild one, and with the snac
 		const t = e.component_groups[`${NS}:free_body`]['minecraft:behavior.tempt'];
 		assert.ok(t, `${b.id} has no tempt goal`);
 		assert.deepStrictEqual(t.items, [F.MILLET]);
-		assert.strictEqual(t.priority, 1, 'Java\'s priority');
+		// Ahead of following its owner and wandering, as Java's; but behind staying seated, so a bird
+		// told to sit isn't pulled off its spot by millet (it flew in its sitting pose, wings tucked).
+		const sit = e.component_groups[`${NS}:pet_goals`]['minecraft:behavior.stay_while_sitting'].priority;
+		const free = e.component_groups[`${NS}:free_body`], pet = e.component_groups[`${NS}:pet_goals`];
+		assert.ok(sit < t.priority, `${b.id}: millet outranks staying seated`);
+		assert.ok(t.priority < pet['minecraft:behavior.follow_owner'].priority, 'millet before following the owner');
+		assert.ok(t.priority < free['minecraft:behavior.random_fly'].priority, 'millet before wandering');
+		for (const g of ['minecraft:behavior.float', 'minecraft:behavior.panic']) assert.ok(e.components[g].priority < sit, `${g} still cuts in on a seated bird`);
 		assert.strictEqual(t.within_radius, 10, 'Java\'s tempt range');
 		assert.strictEqual(t.can_get_scared, false);
 		// Only a free bird: not on its perch, asleep or on a shoulder.

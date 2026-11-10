@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Fixed: a bird told to sit no longer gets up and follows a millet spray, so it never flies with
+  its wings tucked in. It stays seated until you tell it to stand, as Bedrock's own pets do.
+
 ## 0.1.0
 
 The first Bedrock release of Little Birds, with everything in the Java edition's 0.3.0.
