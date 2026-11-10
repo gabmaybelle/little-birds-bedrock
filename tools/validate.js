@@ -80,9 +80,18 @@ function mojangCheck(file, data) {
 	if (data['minecraft:entity']) [kind, body, doc] = ['server/entity', data['minecraft:entity'], 'ActorDocument.json'];
 	else if (data['minecraft:block']) [kind, body, doc] = ['server/block', data['minecraft:block'], 'Blocks.json'];
 	else if (data['minecraft:spawn_rules']) [kind, body, doc] = ['server/spawn', data['minecraft:spawn_rules'], 'Spawn Rules.json'];
+	else if (data['minecraft:item']) [kind, body, doc] = ['server/item', data['minecraft:item'], 'ItemDocument.json'];
 	else return { note: 'no Mojang schema for this kind of file (or this manifest format)' };
-	const [ver, why] = folderFor(kind, data.format_version);
-	const v = mojang.getSchema(`https://mojang.local/${kind}/${ver}/${encodeURIComponent(doc)}`);
+	let [ver, why] = folderFor(kind, data.format_version);
+	let v = mojang.getSchema(`https://mojang.local/${kind}/${ver}/${encodeURIComponent(doc)}`);
+	if (!v) {
+		// Mojang's early folders for some kinds hold parts only (items: the whole document from 1.26.30).
+		const has = fs.readdirSync(path.join(mojangRoot, kind)).filter((x) => /^\d/.test(x) && fs.existsSync(path.join(mojangRoot, kind, x, doc))).sort((a, b) => (vNum(a) < vNum(b) ? -1 : 1));
+		if (has.length) {
+			[ver, why] = [has[0], `the oldest with the whole document; the file is ${data.format_version}`];
+			v = mojang.getSchema(`https://mojang.local/${kind}/${ver}/${encodeURIComponent(doc)}`);
+		}
+	}
 	if (!v) return { note: `no schema: ${kind}/${ver}/${doc} did not load` };
 	return v(body) ? { note: `OK (${kind}/${ver}, ${why})` } : { errors: fmt(v.errors), note: `${kind}/${ver} (${why})` };
 }
@@ -97,6 +106,7 @@ const bcFor = (r) => {
 	if (r.startsWith('bp/spawn_rules/')) return 'behavior/spawn_rules/spawn_rules.json';
 	if (r.startsWith('bp/items/')) return 'behavior/items/items.json';
 	if (r.startsWith('rp/entity/')) return 'resource/entity/entity.json';
+	if (r.startsWith('rp/particles/')) return 'resource/particles/particles.json';
 	if (r.startsWith('rp/animations/')) return 'resource/animations/actor_animation.json';
 	if (r.startsWith('rp/animation_controllers/')) return 'resource/animation_controllers/animation_controller.json';
 	if (r.startsWith('rp/render_controllers/')) return 'resource/render_controllers/render_controllers.json';

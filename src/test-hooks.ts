@@ -18,6 +18,10 @@
 //   little_birds:debug feed <owner id> <bird id>         that owner feeds the bird seeds
 //   little_birds:debug hatch <bird id> <bird id>         those two have a chick now (replies with its id)
 //   little_birds:debug pair <bird id> <bird id>          make two lovebirds a pair
+//   little_birds:debug food <owner id> <bird id> <item>  that owner uses a food on the bird (replies with what it did)
+//   little_birds:debug hungry <bird id>                  the bird is no longer full of a treat or a snack
+//   little_birds:debug settings [on|off] [chance]        sets the settings if given; replies with them
+//   little_birds:debug natural <bird id>                 the settings' spawn check, as if the game spawned it
 //   little_birds:debug state <bird id>                   replies with what this pack knows of the bird
 //   little_birds:debug perf                              replies with what the perch's loops cost (ms)
 //
@@ -29,6 +33,8 @@ import { debugGreeting, greetingPerf } from "./greeting.js";
 import { debugPair, pairPerf, pairUp } from "./pairs.js";
 import { debugSongs, finchSings, sing, songDueNow, songPerf } from "./songs.js";
 import { debugBreeding, feed, hatch } from "./breeding.js";
+import { debugFood, feedFood, hungryAgain } from "./foods.js";
+import { checkNaturalSpawn, saveSettings, settings, spawnCounts } from "./settings.js";
 
 const reply = (o: object) => system.sendScriptEvent(`${NS}:debug_reply`, JSON.stringify(o));
 const overworld = () => world.getDimension("minecraft:overworld");
@@ -85,6 +91,20 @@ function run(message: string) {
     const x = world.getEntity(a[0]), y = world.getEntity(a[1]);
     if (x && y) pairUp(x, y, []);
     reply({ cmd: "pair" });
+  } else if (cmd === "food") {
+    const bird = world.getEntity(a[1]);
+    reply({ cmd: "food", did: bird ? feedFood({ id: a[0], player: world.getAllPlayers().find((p) => p.id === a[0]) }, bird, a[2]) ?? "nothing" : "no bird" });
+  } else if (cmd === "hungry") {
+    const bird = world.getEntity(a[0]);
+    if (bird) hungryAgain(bird);
+    reply({ cmd: "hungry" });
+  } else if (cmd === "settings") {
+    if (a[0] === "on" || a[0] === "off") saveSettings({ naturalSpawning: a[0] === "on", spawnChance: a[1] === undefined ? settings().spawnChance : +a[1] });
+    reply({ cmd: "settings", ...settings(), ...spawnCounts });
+  } else if (cmd === "natural") {
+    const bird = world.getEntity(a[0]);
+    if (bird) checkNaturalSpawn(bird);
+    reply({ cmd: "natural", valid: !!bird?.isValid, ...spawnCounts });
   } else if (cmd === "perf") {
     reply({ cmd: "perf", ...JSON.parse(JSON.stringify(perf)), shoulder: { ...shoulderPerf }, greeting: { ...greetingPerf }, pairs: { ...pairPerf }, songs: { ...songPerf } });
   } else if (cmd === "state") {
@@ -103,6 +123,7 @@ function run(message: string) {
       ...(bird?.isValid ? debugPair(bird) : {}),
       ...(bird?.isValid ? debugSongs(bird) : {}),
       ...(bird?.isValid ? debugBreeding(bird) : {}),
+      ...(bird?.isValid ? debugFood(bird) : {}),
       baby: bird?.isValid ? bird.getComponent("minecraft:is_baby") !== undefined : false,
       dimension: bird?.isValid ? bird.dimension.id : null,
       perches: perchList().length,

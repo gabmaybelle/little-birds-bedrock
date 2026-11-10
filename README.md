@@ -36,9 +36,10 @@ converted from the Java model classes by `tools/java-model-to-geo.js`, box for b
 
 - `npm test`: unit tests of the generated files (the models against the Java classes, sizes,
   colours, health, the component-group rules) and of the rules in `src/*-logic.ts` (the perch, dusk
-  and the greeting, the shoulder, lovebird pairs and finch company, breeding and chicks, the songs)
-  against the Java edition's.
-- `npm run typecheck`: the scripts against the `@minecraft/server` typings the pack asks for.
+  and the greeting, the shoulder, lovebird pairs and finch company, breeding and chicks, the songs,
+  the foods and the settings) against the Java edition's.
+- `npm run typecheck`: the scripts against the `@minecraft/server` and `@minecraft/server-ui`
+  typings the pack asks for.
 - `npm run validate`: every pack file against Mojang's schemas and the community
   [Blockception schemas](https://github.com/Blockception/Minecraft-bedrock-json-schemas).
 - `node tools/bds-check.js <server folder> --zip <bedrock-server zip>`: loads the packs on a
@@ -47,7 +48,14 @@ converted from the Java model classes by `tools/java-model-to-geo.js`, box for b
   tamed bird claims one, sleeps on it at night, goes home when its owner is away, is called to
   it, set down on it, shares it (two finches) or doesn't (two budgies); the greeting, dusk and the
   shoulder; lovebirds pairing and keeping together, finches keeping company, breeding and chicks,
-  and the songs. Running the server means accepting Minecraft's EULA.
+  the songs, the millet spray, snacks and refused foods, and the settings. Running the server means
+  accepting Minecraft's EULA.
+
+## Settings
+
+The Java edition's two settings, as a form: an operator types `/little_birds:settings` in chat.
+"Wild birds spawn" turns natural spawning on or off (spawn eggs always work), and "Spawn chance"
+(0 to 100) makes wild birds rarer. They are kept with the world and take effect at once.
 
 ## Licence
 

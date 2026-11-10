@@ -40,7 +40,10 @@ function manifest(file) {
 	m.header.version = v;
 	for (const mod of m.modules) mod.version = v;
 	for (const d of m.dependencies || []) {
-		if (d.module_name === '@minecraft/server') d.version = pkg.devDependencies['@minecraft/server'];
+		if (d.module_name) {
+			d.version = pkg.devDependencies[d.module_name];
+			if (!d.version) fail(`${file} asks for ${d.module_name}, which package.json doesn't pin`);
+		}
 		else if (d.uuid) d.version = v;
 	}
 	return m;
@@ -53,6 +56,8 @@ function lang(javaLang) {
 		let m;
 		if ((m = /^entity\.little_birds\.(\w+)$/.exec(k))) lines.push(`entity.${NS}:${m[1]}.name=${v}`);
 		else if ((m = /^item\.little_birds\.(\w+)_spawn_egg$/.exec(k))) lines.push(`item.spawn_egg.entity.${NS}:${m[1]}.name=${v}`);
+		// Other items keep Java's key; the item's display_name names it (packs.milletItem).
+		else if (/^item\.little_birds\.\w+$/.test(k)) lines.push(`${k}=${v}`);
 		else if ((m = /^block\.little_birds\.(\w+)$/.exec(k))) lines.push(`tile.${NS}:${m[1]}.name=${v}`);
 		else if (/^subtitles\.little_birds\./.test(k)) lines.push(`${k}=${v}`);
 	}
@@ -141,7 +146,7 @@ function build() {
 	}
 	writeJson(path.join(rp, 'animation_controllers', `${NS}.animation_controllers.json`), packs.animationControllers());
 
-	// Item sprites (the spawn eggs now; the millet spray for a later session) and the perch texture.
+	// Item sprites (the spawn eggs and the millet spray) and the perch texture.
 	const itemTextures = {};
 	for (const p of java.list(`${A}textures/item/`)) {
 		const n = path.posix.basename(p, '.png');
@@ -163,6 +168,13 @@ function build() {
 		texture_data: { [`${NS}_perch`]: { textures: 'textures/blocks/perch' } },
 	});
 	writeJson(path.join(rp, 'blocks.json'), { format_version: '1.21.40', [`${NS}:perch`]: { sound: 'wood' } });
+
+	// The foods: the millet spray item and its recipe (Java's, unlocked as Java's advancement does),
+	// and the crumbs each snack leaves.
+	if (!itemTextures[`${NS}_millet_spray`]) fail('no millet spray sprite in the Java repo');
+	writeJson(path.join(bp, 'items', 'millet_spray.json'), packs.milletItem());
+	writeJson(path.join(bp, 'recipes', 'millet_spray.json'), packs.shapelessRecipe(JSON.parse(java.text(`${DATA}recipe/millet_spray.json`)), JSON.parse(java.text(`${DATA}advancement/recipes/millet_spray.json`))));
+	for (const s of packs.SNACKS) writeJson(path.join(rp, 'particles', `crumbs_${s.replace('minecraft:', '')}.json`), packs.crumbs(s));
 
 	// Sounds: every OGG, the definitions, and which ones each bird plays.
 	for (const p of java.list(`${A}sounds/`)) {

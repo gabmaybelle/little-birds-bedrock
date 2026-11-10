@@ -26,9 +26,20 @@ export const greetings = new Map<string, number>();
 /** What the watch costs, in milliseconds (the self-test's budget reads it). */
 export const greetingPerf = { runs: 0, ms: 0, max: 0 };
 
+/**
+ * Other poses kept right by this watch, every half second, for every bird: each puts its property
+ * back in step with whether the pose is running (the head shake for a refused food: foods.ts).
+ */
+export const menders: ((bird: Entity) => void)[] = [];
+
 export function greet(bird: Entity) {
   greetings.set(bird.id, (greetings.get(bird.id) ?? 0) + 1);
   bird.dimension.playSound(`${NS}.${kindOf(bird)}_greeting`, bird.location, { volume: 1, pitch: voicePitch() });
+  bob(bird);
+}
+
+/** The greeting pose alone, with no call: the happy bob for a treat (LittleBird.enjoyTreat sends only the pose). */
+export function bob(bird: Entity) {
   bird.setProperty(`${NS}:greeting`, true);
   const id = bird.id;
   greeting.set(id, system.currentTick + greetingTicks(kindOf(bird)));
@@ -57,6 +68,7 @@ function watch() {
         // tick that greets.)
         const posing = greeting.has(bird.id);
         if ((bird.getProperty(`${NS}:greeting`) === true) !== posing) bird.setProperty(`${NS}:greeting`, posing);
+        for (const mend of menders) mend(bird);
         if (!isTamed(bird) || ownerIdOf(bird) === undefined) continue;
         const saved = bird.getDynamicProperty(P_LAST_SAW);
         const lastSaw = typeof saved === "number" ? saved : -1;

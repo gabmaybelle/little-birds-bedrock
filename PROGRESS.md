@@ -278,6 +278,95 @@ Checks after session 5:
 - A local simulated-player check: a chick hatched with a real player as owner is tamed to them and
   follows them. It also showed the game's own breeding failing with these birds (see above).
 
+**Millet spray, snacks, refused foods and the settings (2026-11-09, session 6).** Java's `Foods`,
+the food parts of `LittleBird.mobInteract`, and `Settings` with the spawn check, on Bedrock. The
+rules are in `src/food-logic.ts` and `src/settings-logic.ts` (no game objects, so the unit tests run
+them); `src/foods.ts` and `src/settings.ts` apply them.
+
+- The millet spray: Java's item, sprite, name and recipe (wheat and two seeds, shapeless, make two;
+  it unlocks once you hold wheat), with the foods in the creative inventory. It tames a wild bird on
+  the first try, with hearts. For its owner's tamed bird it is a treat: a happy bob (the greeting
+  pose without the call), or a song from a canary and a phrase from a finch (whose neighbours
+  answer), and half a heart of health back. A treat is not a meal: for half a minute after one the
+  bird takes no other and the spray stays in the hand; someone else's bird takes none. Millet in a
+  hand within 10 blocks tempts a free bird to follow it, wild or tamed (not one on its perch or a
+  shoulder), ahead of wandering and following its owner, as Java's tempt goal is.
+- Snacks from the farm (carrot, apple, melon slice, sweet berries, glow berries, beetroot): a tamed
+  bird nibbles one from its owner, crumbs of that food fly, it gets half a heart of health back, and
+  then it has had enough for five seconds. A wild bird, or someone else's, takes none.
+- Refused foods (cocoa beans, a poisonous potato): any bird shakes its head for a second and takes
+  nothing (the head shake pose from session 2).
+- Chicks: a treat or a snack from its owner grows a chick a little too, as seeds do. Only the game's
+  own feeding can change a chick's age, so for a chick the food goes on to it (it takes the item)
+  and the script does the rest (health, full, the bob or song).
+- Treats and snacks are silent, as on Java (its birds play no eating sound for them), and neither
+  makes a tamed bird sit or stand. The bird's food counts and "full" timers aren't saved, as on
+  Java.
+- The settings, as a form: an operator types `/little_birds:settings` (cheats needn't be on) and
+  sets Java's two settings, "Wild birds spawn" and "Spawn chance" (0 to 100). They are kept on the
+  world and take effect at once. A spawn rule's weight can't change while the game runs, so they
+  work as Java's spawn check does: the herd in the birds' spawn rules marks a natural spawn (an
+  event of its own, otherwise the same as any new bird's; the game reports eggs and commands as
+  spawned too, so it can't tell them apart), and the script lets it stay only while spawning is
+  on and at the chance, else takes it away the moment it appears. Spawn eggs, commands and chicks
+  are never marked, so they always work. From a console or a command block the command says to
+  open it as a player, with the current values.
+
+Differences from Java, each because Bedrock can't do it the Java way:
+- The settings are a form, kept with the world, and apply at once (Java's are a config file read at
+  start-up). A turned-down spawn is taken away just after it appears rather than never made.
+- Crumbs are bits of Bedrock's own picture of the snack (one particle per snack; a particle can't
+  take an item's picture as Java's item particle does).
+- A chick's growing for a treat or a snack is the game's feeding, which is Bedrock's own amount for
+  a feed item (the same as for seeds since session 5), and it may make the game's eating sound.
+
+Also this session: the soak's budget is judged on its averages (1 ms a tick, 3 ms a once-a-second
+pass, 1 ms for each other watch), with a loose cap on a single slow moment (25 ms, a pass 50 ms),
+since its worst-moment check failed at random on session 4's code too; and the checks' upload step
+moved to version 7 of the upload action.
+
+Checks after session 6:
+- `npm test`: 55 unit tests (10 new). Foods: the treat, snacks and refused lists are Java's tags;
+  Java's numbers (full 600 and 100 ticks, a 20-tick shake, 1 health); no eating sound on Java; what
+  each food does for a wild bird, the owner's bird, someone else's, a full bird and a chick, in
+  Java's order; the bob, the canary's song and the finch's phrase; the tempt goal (Java's priority,
+  range 10, free birds only), millet on the tame list, millet and snacks growing chicks; the item,
+  its sprite and name, the recipe and its unlock read from Java's files; one crumb particle per
+  snack with Bedrock's sprite of it. Settings: Java's two, its defaults and its clamp; a natural
+  spawn stays only while spawning is on, at the chance; every spawn rule marks its herd, and eggs,
+  commands and chicks aren't marked.
+- `npm run typecheck`: clean against `@minecraft/server` 2.10.0 and `@minecraft/server-ui` 2.2.0,
+  which the pack asks for. `npm run validate`: 51 files, no errors (13 known schema lags); the item
+  is checked against Mojang's item schema and the particles against the community one (a broken
+  particle on purpose fails it).
+- Self-test: 56 cases on each server (8 new) and the restart check, on 1.26.63.1 and Preview
+  1.26.70.23, with no error or warning lines. Foods: the millet spray is a known item that stacks
+  to 64; it tames each of the five wild birds on the first try, to whoever gave it, which can then
+  move; a stranger's treat isn't taken; the owner's treat gives the bob without a greeting and
+  half a heart, then nothing for half a minute, then again, never above full health; a canary
+  sings for it and a finch sings a phrase; all six snacks are taken by the owner's bird with
+  health back, one in five seconds, a treat still taken in between, and not by a stranger's or a
+  wild bird; seeds aren't a food here; cocoa and a poisonous potato get a head shake of about a
+  second from a wild bird, a stranger and the owner, with nothing taken; a chick takes its owner's
+  treat and snack, not a stranger's. Settings: the defaults are on and 100; a natural spawn stays
+  and loses its mark; with spawning off a natural spawn goes while an egg-style spawn, a `/summon`
+  bird and a chick stay; at chance 0 it goes; at 50, some of 40 stay and some go; 250 reads back as
+  100; the command is there (a made-up one fails to parse). The soak, judged on its averages: 0.37
+  to 0.40 ms a tick, 1.3 to 1.5 ms a pass, 0.35 ms for the greeting watch, worst 3 to 6 ms.
+  Under another program's heavy load one release run went over (0.86 ms a tick, 3.7 ms a pass, one
+  30 ms tick); the same files on a quieter PC came in as above. A fresh wild flock still sometimes
+  stands still for a whole first try (once, both tries); side by side with and without the new
+  tempt goal it happened about as often (3 and 2 of 50 flocks), so it is the old quirk.
+  Once, on Preview, the restart setup's lovebird didn't roost; it didn't happen again in three runs.
+- A local simulated-player check, with real natural spawns: a simulated player in survival in a
+  plains world, vanilla animals cleared, mob spawning on. On 1.26.63.1 a wild zebra finch appeared
+  within minutes, marked, and passed the settings' check; with spawning off the next one was taken
+  away. On Preview two finches were kept; no new one came in the 5 minutes with spawning off. The
+  first try, with the mark set by a spawn condition's event rather than the herd's, found the finch
+  unmarked: why the herd carries it. The same check showed that the spawn cause can't tell natural
+  spawns from eggs and commands.
+
 ## Next
 
-1. Session 6: millet spray, snacks, refused foods; the settings form.
+1. Gabby's look in the game at the foods and the settings (local notes have the list), then the
+   release session: the `.mcaddon`, the listings and the cross-links.

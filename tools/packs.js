@@ -11,6 +11,11 @@ const { perTick, deg } = require('./birds.js');
 
 const NS = 'little_birds';
 const SEEDS = ['wheat_seeds', 'pumpkin_seeds', 'melon_seeds', 'beetroot_seeds', 'pitcher_pod', 'torchflower_seeds'];
+/** The treat and the snacks (Java's Foods; src/food-logic.ts has the same lists and the rules). */
+const MILLET = `${NS}:millet_spray`;
+const SNACKS = ['minecraft:carrot', 'minecraft:apple', 'minecraft:melon_slice', 'minecraft:sweet_berries', 'minecraft:glow_berries', 'minecraft:beetroot'];
+/** The event a bird's spawn rules fire: a natural spawn, which src/settings.ts looks at. */
+const SPAWNED_WILD = `${NS}:spawned_wild`;
 
 // ---------------------------------------------------------------- behaviour pack
 
@@ -27,6 +32,9 @@ function properties(bird) {
 		[`${NS}:shoulder`]: { type: 'bool', default: false, client_sync: true },
 		[`${NS}:greeting`]: { type: 'bool', default: false, client_sync: true },
 		[`${NS}:shaking`]: { type: 'bool', default: false, client_sync: true },
+		// Set by the spawn rules' event on a bird the game spawned on its own; the settings script
+		// looks at it the moment the bird appears, then clears it.
+		[`${NS}:natural_spawn`]: { type: 'bool', default: false, client_sync: false },
 	};
 	if (bird.song) p[`${NS}:singing`] = { type: 'bool', default: false, client_sync: true };
 	// A lovebird pair's slot (src/pairs.ts): 0 for none; the follow goal reads it.
@@ -122,7 +130,9 @@ function entity(bird) {
 				// may despawn, like a vanilla parrot.
 				[`${NS}:wild`]: {
 					'minecraft:despawn': { despawn_from_distance: {} },
-					'minecraft:tameable': { probability: 0.33, tame_items: SEEDS, tame_event: { event: 'minecraft:on_tame', target: 'self' } },
+					// The millet spray tames on the first try; the food script does that (src/foods.ts) and
+					// stops the game's own try. It is listed here so a phone shows the interact button for it.
+					'minecraft:tameable': { probability: 0.33, tame_items: [...SEEDS, MILLET], tame_event: { event: 'minecraft:on_tame', target: 'self' } },
 				},
 				// A grown bird. Breeding is the script's (src/breeding.ts): the game's own breeding didn't
 				// finish with flying birds and can't keep a lovebird to its partner. A chick gives no
@@ -134,7 +144,10 @@ function entity(bird) {
 				[`${NS}:chick`]: {
 					'minecraft:is_baby': {},
 					'minecraft:scale': { value: CHICK_SCALE },
-					'minecraft:ageable': { duration: GROW_UP, feed_items: SEEDS, grow_up: { event: `${NS}:grown_up`, target: 'self' } },
+					// Seeds, the millet spray and the snacks each grow it a little (Java's ageUp for a tenth of
+					// the time left). Only this component can change a chick's age, so the food script lets
+					// a treat or a snack its owner gives go on to it (src/foods.ts).
+					'minecraft:ageable': { duration: GROW_UP, feed_items: [...SEEDS, MILLET, ...SNACKS], grow_up: { event: `${NS}:grown_up`, target: 'self' } },
 					'minecraft:behavior.follow_parent': { priority: 5, speed_multiplier: 1.1 },
 				},
 				[`${NS}:tame`]: {
@@ -154,6 +167,10 @@ function entity(bird) {
 					'minecraft:movement': { value: 0.4 },
 					'minecraft:pushable': { is_pushable: true, is_pushable_by_piston: true },
 					...keepClose(bird),
+					// Millet in a hand within 10 blocks wins over wandering and following (Java's TemptGoal at
+					// priority 1, its range 10, not scared off). Only a free bird: one on its perch, its
+					// seat for the night, or a shoulder isn't moved by it.
+					'minecraft:behavior.tempt': { priority: 1, speed_multiplier: 1, within_radius: 10, can_tempt_vertically: true, can_get_scared: false, items: [MILLET] },
 					'minecraft:behavior.random_fly': { priority: 4, avoid_damage_blocks: true, can_land_on_trees: true, y_offset: 0, speed_multiplier: 1, xz_dist: 15, y_dist: 1 },
 					'minecraft:ambient_sound_interval': { event_name: 'ambient', value: 4, range: 4 },
 				},
@@ -193,6 +210,13 @@ function entity(bird) {
 				// Every new bird (natural spawn, egg, /summon) picks one of its colours at random, as on Java.
 				'minecraft:entity_spawned': {
 					set_property: { [`${NS}:colour`]: `math.random_integer(0, ${bird.colours.length - 1})` },
+					add: { component_groups: [`${NS}:wild`, `${NS}:free_body`, `${NS}:adult`] },
+				},
+				// A natural spawn (the spawn rules' herd fires this one after the event above): the same,
+				// and marked, so the settings script can let it stay or take it away again (Java's spawn
+				// check: src/settings.ts). It repeats the above in case it ever runs in its place.
+				[SPAWNED_WILD]: {
+					set_property: { [`${NS}:colour`]: `math.random_integer(0, ${bird.colours.length - 1})`, [`${NS}:natural_spawn`]: true },
 					add: { component_groups: [`${NS}:wild`, `${NS}:free_body`, `${NS}:adult`] },
 				},
 				// A chick from breeding (src/breeding.ts): wild for the moment it takes to tame it to its
@@ -251,7 +275,11 @@ function spawnRules(bird) {
 				'minecraft:spawns_on_block_filter': s.on.length === 1 ? s.on[0] : s.on,
 				'minecraft:brightness_filter': { min: 7, max: 15, adjust_for_weather: false },
 				'minecraft:weight': { default: s.weight },
-				'minecraft:herd': { min_size: s.herd[0], max_size: s.herd[1] },
+				// The herd's event marks every bird of it as a natural spawn, for the settings
+				// (src/settings.ts). It runs after the bird's own spawn event, as vanilla horses' coat
+				// events do. (A condition's spawn_event was tried first: a natural finch came without
+				// the mark, in a simulated player's world.)
+				'minecraft:herd': { min_size: s.herd[0], max_size: s.herd[1], event: SPAWNED_WILD, event_skip_count: 0 },
 				'minecraft:biome_filter': { test: 'has_biome_tag', operator: '==', value: tag },
 			}))),
 		},
@@ -534,4 +562,81 @@ function blockModelToGeo(javaModel, identifier, textureSize = 16) {
 	};
 }
 
-module.exports = { NS, entity, spawnRules, clientEntity, renderController, animations, animationControllers, perchBlock, perchRecipe, blockModelToGeo };
+// ---------------------------------------------------------------- the foods
+
+// Java's millet spray (Foods.MILLET_SPRAY): a plain item, in the food part of the creative menu, its
+// sprite and name from the Java repo. What it does is the food script's (src/foods.ts).
+function milletItem() {
+	return {
+		format_version: '1.21.60',
+		'minecraft:item': {
+			description: { identifier: MILLET, menu_category: { category: 'equipment', group: 'minecraft:itemGroup.name.miscFood' } },
+			components: {
+				'minecraft:icon': `${NS}_millet_spray`,
+				'minecraft:display_name': { value: `item.${NS}.millet_spray` },
+				'minecraft:max_stack_size': 64,
+			},
+		},
+	};
+}
+
+// Java's shapeless recipe as Bedrock's: the same ingredients (a repeated one as a count) and result,
+// unlocked by what Java's recipe advancement unlocks it with (the items its inventory check names).
+function shapelessRecipe(javaRecipe, javaAdvancement) {
+	const counts = new Map();
+	for (const i of javaRecipe.ingredients) counts.set(i, (counts.get(i) || 0) + 1);
+	const ingredients = [...counts].map(([item, count]) => (item.startsWith('#') ? { tag: item.slice(1), count } : { item, count }));
+	const unlock = [];
+	for (const c of Object.values(javaAdvancement.criteria)) {
+		if (c.trigger !== 'minecraft:inventory_changed') continue;
+		for (const i of c.conditions.items) unlock.push({ item: i.items });
+	}
+	return {
+		format_version: '1.20.10',
+		'minecraft:recipe_shapeless': {
+			description: { identifier: javaRecipe.result.id },
+			tags: ['crafting_table'],
+			unlock,
+			ingredients,
+			result: { item: javaRecipe.result.id, count: javaRecipe.result.count || 1 },
+		},
+	};
+}
+
+// The crumbs a snack leaves (Java: ITEM particles of the snack, 6, spread 0.1, speed 0.05): bits of
+// the snack's own vanilla sprite, a quarter of it each, falling like Bedrock's item-break bits. One
+// particle per snack, since a particle's texture is fixed.
+function crumbs(snack) {
+	const name = snack.replace('minecraft:', '');
+	// The vanilla sprite's name where it differs from the item's.
+	const sprite = { melon_slice: 'melon' }[name] || name;
+	return {
+		format_version: '1.10.0',
+		particle_effect: {
+			description: {
+				identifier: `${NS}:crumbs_${name}`,
+				basic_render_parameters: { material: 'particles_alpha', texture: `textures/items/${sprite}` },
+			},
+			components: {
+				'minecraft:emitter_rate_instant': { num_particles: 6 },
+				'minecraft:emitter_lifetime_once': { active_time: 0 },
+				'minecraft:emitter_shape_point': {
+					offset: ['math.random(-0.1, 0.1)', 'math.random(-0.1, 0.1)', 'math.random(-0.1, 0.1)'],
+					direction: ['math.random(-1, 1)', 'math.random(0, 1)', 'math.random(-1, 1)'],
+				},
+				'minecraft:particle_lifetime_expression': { max_lifetime: '0.2 / (math.random(0, 1) * 0.9 + 0.1)' },
+				'minecraft:particle_initial_speed': 'math.random(0.5, 1.5)',
+				'minecraft:particle_motion_dynamic': { linear_acceleration: [0, -9.8, 0], linear_drag_coefficient: 0.5 },
+				'minecraft:particle_motion_collision': { collision_drag: 5, coefficient_of_restitution: 0.1, collision_radius: 0.05 },
+				'minecraft:particle_appearance_billboard': {
+					size: ['variable.particle_random_1 * 0.04 + 0.04', 'variable.particle_random_1 * 0.04 + 0.04'],
+					facing_camera_mode: 'lookat_xyz',
+					uv: { texture_width: 16, texture_height: 16, uv: ['math.floor(variable.particle_random_3 * 12)', 'math.floor(variable.particle_random_4 * 12)'], uv_size: [4, 4] },
+				},
+				'minecraft:particle_appearance_lighting': {},
+			},
+		},
+	};
+}
+
+module.exports = { NS, MILLET, SNACKS, SEEDS, SPAWNED_WILD, entity, spawnRules, clientEntity, renderController, animations, animationControllers, perchBlock, perchRecipe, blockModelToGeo, milletItem, shapelessRecipe, crumbs };

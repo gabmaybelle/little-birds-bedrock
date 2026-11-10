@@ -131,13 +131,14 @@ test('the breeding numbers are vanilla\'s', () => {
 	assert.strictEqual(B.MATE_REACH, 8);
 	assert.strictEqual(B.COURT_TICKS, 60);
 	assert.strictEqual(B.BREED_DIST, 3);
-	// The script's seeds are the entity's (they tame wild birds and grow chicks).
+	// The script's seeds are the entity's (they tame wild birds and grow chicks); the millet spray is
+	// on the tame list too, and it and the snacks grow chicks (the foods' test checks those).
 	const e = ent('budgie');
-	const tameItems = e.component_groups[`${NS}:wild`]['minecraft:tameable'].tame_items;
+	const tameItems = e.component_groups[`${NS}:wild`]['minecraft:tameable'].tame_items.filter((i) => i !== packs.MILLET);
 	const src = fs.readFileSync(path.join(root, 'src/breeding.ts'), 'utf8');
 	const seeds = JSON.parse(src.match(/export const SEEDS = (\[[^\]]*\])/)[1]);
 	assert.deepStrictEqual(seeds, tameItems.map((i) => `minecraft:${i}`));
-	assert.deepStrictEqual(e.component_groups[`${NS}:chick`]['minecraft:ageable'].feed_items, tameItems);
+	assert.deepStrictEqual(e.component_groups[`${NS}:chick`]['minecraft:ageable'].feed_items.slice(0, tameItems.length), tameItems);
 });
 
 const br = (o) => ({ id: 'a', kind: 'budgie', location: { x: 0, y: 64, z: 0 }, tame: true, baby: false, loveUntil: 0, readyAt: 0, ...o });

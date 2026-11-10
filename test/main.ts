@@ -638,7 +638,9 @@ perchCase("perch_chunk_unload", async () => {
 });
 
 // Many birds, several nights: every bird home each night on its own perch, up each morning, none
-// lost, and what the perch's script costs measured (budget: 5 ms worst tick, 10 ms worst pass).
+// lost, and what the scripts cost measured. Judged on the averages (budget: 1 ms a tick, 3 ms a
+// once-a-second pass, 1 ms for each other watch); a single slow moment fails only past a loose cap
+// (25 ms a tick or a watch, 50 ms a pass): one tick on a busy PC can take several times its usual.
 perchCase("perch_soak", async () => {
   const n = 16, nights = 3, perches: Vector3[] = [], flock: Entity[] = [];
   const facings = ["north", "south", "east", "west"];
@@ -673,7 +675,15 @@ perchCase("perch_soak", async () => {
   const p1 = (await ask("perf")) as unknown as Perf;
   const tick = { runs: p1.tick.runs - p0.tick.runs, ms: p1.tick.ms - p0.tick.ms }, sec = { runs: p1.second.runs - p0.second.runs, ms: p1.second.ms - p0.second.ms };
   log(`note perch_soak cost: per tick ${(tick.ms / tick.runs).toFixed(3)} ms mean, ${p1.tick.max} ms worst; once-a-second pass ${(sec.ms / sec.runs).toFixed(2)} ms mean, ${p1.second.max} ms worst (${n} birds, ${nights} nights, ${tick.runs} ticks); greeting watch ${(p1.greeting.ms / Math.max(1, p1.greeting.runs)).toFixed(2)} ms mean, ${p1.greeting.max} ms worst; pairs ${(p1.pairs.ms / Math.max(1, p1.pairs.runs)).toFixed(2)} ms mean, ${p1.pairs.max} worst; songs ${(p1.songs.ms / Math.max(1, p1.songs.runs)).toFixed(2)} ms mean, ${p1.songs.max} worst`);
-  must(p1.tick.max <= 5 && p1.second.max <= 10 && p1.greeting.max <= 5, `over budget: worst tick ${p1.tick.max} ms (budget 5), worst pass ${p1.second.max} ms (budget 10), worst greeting watch ${p1.greeting.max} ms (budget 5)`);
+  const mean = (r: Run, r0: Run) => (r.ms - r0.ms) / Math.max(1, r.runs - r0.runs);
+  const over: string[] = [];
+  if (tick.ms / tick.runs > 1) over.push(`per tick ${(tick.ms / tick.runs).toFixed(3)} ms on average (budget 1)`);
+  if (sec.ms / sec.runs > 3) over.push(`once-a-second pass ${(sec.ms / sec.runs).toFixed(2)} ms on average (budget 3)`);
+  for (const w of ["greeting", "pairs", "songs"] as const) if (mean(p1[w], p0[w]) > 1) over.push(`${w} ${mean(p1[w], p0[w]).toFixed(2)} ms on average (budget 1)`);
+  if (p1.tick.max > 25) over.push(`one tick took ${p1.tick.max} ms (cap 25)`);
+  if (p1.second.max > 50) over.push(`one pass took ${p1.second.max} ms (cap 50)`);
+  for (const w of ["greeting", "pairs", "songs"] as const) if (p1[w].max > 25) over.push(`one ${w} watch took ${p1[w].max} ms (cap 25)`);
+  must(over.length === 0, `over budget: ${over.join("; ")}`);
 });
 type Run = { runs: number; ms: number; max: number };
 type Perf = { tick: Run; second: Run; shoulder: Run; greeting: Run; pairs: Run; songs: Run };
@@ -910,6 +920,215 @@ perchCase("song_finches", async () => {
   void p;
 });
 
+// ---------------------------------------------------------------- foods and settings (session 6)
+//
+// East of the bird lanes (x 36 to 56), inside the ticking area. The food hook is a stand-in owner
+// using the food on the bird (no player, so nothing leaves a hand and a chick's growing, which is
+// the game's own feeding, isn't seen here).
+
+type Fed = Bird & { treats: number; snacks: number; refusals: number; treatFull: number; snackFull: number; shaking: boolean; health: number; greetings: number };
+const fedState = (e: Entity) => ask(`state ${e.id}`) as Promise<Fed>;
+const useFood = async (owner: string, e: Entity, item: string) => ((await ask(`food ${owner} ${e.id} ${item}`)) as unknown as { did: string }).did;
+const shakingPose = (e: Entity) => e.isValid && e.getProperty(`${NS}:shaking`) === true;
+const MILLET = `${NS}:millet_spray`;
+const SNACKS = ["minecraft:carrot", "minecraft:apple", "minecraft:melon_slice", "minecraft:sweet_berries", "minecraft:glow_berries", "minecraft:beetroot"];
+
+// The item is one the game knows, a stack of 64.
+perchCase("food_item", async () => {
+  const m = new ItemStack(MILLET);
+  must(m.typeId === MILLET, `the millet spray is ${m.typeId}`);
+  must(m.maxAmount === 64, `stacks to ${m.maxAmount}`);
+});
+
+// The millet spray tames a wild bird on the first try, to whoever gave it; then it is full.
+perchCase("food_millet_tames", async () => {
+  for (const [i, kind] of BIRDS.map((b) => b.id).entries()) {
+    const w = spawn(kind, at(36 + i * 3, 0));
+    await wait(2);
+    must(!tamed(w), `a new ${kind} is tamed`);
+    const did = await useFood(i % 2 ? "owner2" : "owner1", w, MILLET);
+    must(did === "tame", `the millet spray did "${did}" for a wild ${kind}`);
+    must(await waitFor(() => tamed(w), 10, 1), `a wild ${kind} was not tamed by the millet spray`);
+    const s = await fedState(w);
+    must(s.owner === (i % 2 ? "owner2" : "owner1"), `${kind} tamed to ${s.owner}`);
+    must(s.treats === 1 && s.treatFull > 500, `${kind}: treats ${s.treats}, full for ${s.treatFull}`);
+    must(Math.abs(speed(w) - 0.4) < 1e-6, `${kind} can't move after taming (movement ${speed(w)})`);
+  }
+  // Someone else's millet for a tamed bird: nothing.
+  const b = await petBird("budgie", 36, 4);
+  must((await useFood("owner2", b, MILLET)) === "refuse", "a stranger's treat was taken");
+});
+
+// A treat for its owner's bird: a bob (the greeting pose, without the greeting), health back; full
+// for half a minute; nothing from a stranger. A canary sings for it; a finch sings a phrase.
+perchCase("food_treat", async () => {
+  const b = await petBird("budgie", 40, 8);
+  b.applyDamage(2);
+  await wait(2);
+  const h0 = (await fedState(b)).health;
+  must(h0 === 3, `health ${h0} after 2 damage, expected 3`);
+  const g0 = (await fedState(b)).greetings;
+  must((await useFood("owner1", b, MILLET)) === "treat", "the owner's treat was not taken");
+  must(await waitFor(() => greetingPose(b), 10, 1), "no happy bob");
+  let s = await fedState(b);
+  must(s.health === 4 && s.treats === 1, `health ${s.health}, treats ${s.treats}`);
+  must(s.greetings === g0, "a treat counted as a greeting (it is the bob alone, with no call)");
+  must(await waitFor(() => !greetingPose(b), 60), "the bob never ended");
+  must((await useFood("owner1", b, MILLET)) === "refuse", "a second treat within half a minute was taken");
+  must((await fedState(b)).health === 4, "a refused treat healed");
+  must((await useFood("owner2", b, MILLET)) === "refuse", "a stranger's treat was taken");
+  await ask(`hungry ${b.id}`);
+  must((await useFood("owner1", b, MILLET)) === "treat", "no treat once hungry again");
+  await ask(`hungry ${b.id}`);
+  must((await useFood("owner1", b, MILLET)) === "treat", "no treat at full health");
+  s = await fedState(b);
+  must(s.health === 5 && s.treats === 3, `health ${s.health} (the most is 5), treats ${s.treats}`);
+  // Song birds sing for it instead.
+  const c = await petBird("canary", 44, 8);
+  const c0 = (await fedState(c)).songs;
+  must((await useFood("owner1", c, MILLET)) === "treat", "the canary's treat was not taken");
+  must(await waitFor(() => c.getProperty(`${NS}:singing`) === true, 10, 1), "the canary did not take its singing pose");
+  must((await fedState(c)).songs === c0 + 1, "the canary did not sing for its treat");
+  must(!greetingPose(c), "the canary bobbed instead of singing");
+  const f = await petBird("zebra_finch", 48, 8);
+  const f0 = (await fedState(f)).songs;
+  must((await useFood("owner1", f, MILLET)) === "treat", "the finch's treat was not taken");
+  must((await fedState(f)).songs === f0 + 1, "the finch did not sing a phrase for its treat");
+});
+
+// Snacks: each of the six from its owner, with crumbs, health back, then full for five seconds; a
+// stranger's and a wild bird's are not taken.
+perchCase("food_snack", async () => {
+  const b = await petBird("lovebird", 40, 14);
+  b.applyDamage(2);
+  must((await useFood("owner1", b, "minecraft:carrot")) === "snack", "the owner's carrot was not taken");
+  let s = await fedState(b);
+  must(s.health === 4 && s.snacks === 1 && s.snackFull > 90, `health ${s.health}, snacks ${s.snacks}, full for ${s.snackFull}`);
+  must((await useFood("owner1", b, "minecraft:apple")) === "refuse", "a second snack within five seconds was taken");
+  must((await useFood("owner1", b, MILLET)) === "treat", "a snack filled it for a treat too");
+  await wait(105);
+  must((await useFood("owner1", b, "minecraft:apple")) === "snack", "no snack after five seconds");
+  for (const item of SNACKS) {
+    await ask(`hungry ${b.id}`);
+    must((await useFood("owner1", b, item)) === "snack", `${item} is not a snack`);
+  }
+  s = await fedState(b);
+  must(s.snacks === 2 + SNACKS.length && s.health === 5, `snacks ${s.snacks}, health ${s.health}`);
+  await ask(`hungry ${b.id}`);
+  must((await useFood("owner2", b, "minecraft:apple")) === "refuse", "a stranger's snack was taken");
+  const w = spawn("budgie", at(44, 14));
+  await wait(2);
+  must((await useFood("owner1", w, "minecraft:beetroot")) === "refuse", "a wild bird took a snack");
+  must(!tamed(w), "a snack tamed a wild bird");
+  must((await useFood("owner1", b, "minecraft:wheat_seeds")) === "nothing", "seeds went through the foods");
+});
+
+// Refused foods: any bird shakes its head for about a second and takes nothing.
+perchCase("food_refused", async () => {
+  const w = spawn("cockatiel", at(40, 20));
+  const b = await petBird("canary", 44, 20);
+  b.applyDamage(1);
+  await wait(2);
+  for (const [e, owner, item] of [[w, "owner1", "minecraft:cocoa_beans"], [b, "owner2", "minecraft:poisonous_potato"], [b, "owner1", "minecraft:cocoa_beans"]] as [Entity, string, string][]) {
+    const before = await fedState(e);
+    must((await useFood(owner, e, item)) === "shake", `${item} was not refused`);
+    must(await waitFor(() => shakingPose(e), 5, 1), "no head shake");
+    must(await waitFor(() => !shakingPose(e), 30, 2), "the head shake never ended");
+    const after = await fedState(e);
+    must(after.refusals === before.refusals + 1 && after.treats === before.treats && after.snacks === before.snacks, `took something: ${JSON.stringify(after)}`);
+    must(after.health === before.health, "a refused food healed");
+  }
+  must(!tamed(w), "cocoa tamed a wild bird");
+});
+
+// A chick: its owner's treat and snack are taken (health, full); its growing is the game's feeding.
+perchCase("food_chick", async () => {
+  const c = summonChick("budgie", 48, 20);
+  c.triggerEvent("minecraft:on_tame");
+  await wait(2);
+  debug(`own ${c.id} owner1`);
+  c.applyDamage(2);
+  await wait(2);
+  must((await fedState(c)).baby, "not a chick");
+  must((await useFood("owner1", c, MILLET)) === "treat", "the chick's treat was not taken");
+  must((await useFood("owner1", c, "minecraft:sweet_berries")) === "snack", "the chick's snack was not taken");
+  const s = await fedState(c);
+  must(s.health === 5 && s.treats === 1 && s.snacks === 1, `health ${s.health}, treats ${s.treats}, snacks ${s.snacks}`);
+  must((await useFood("owner2", c, "minecraft:carrot")) === "refuse", "a stranger's snack for a chick was taken");
+});
+
+// The settings: Java's defaults; a natural spawn stays or goes by them, and spawn eggs, commands and
+// chicks never go. The spawns here fire the spawn rules' event the way a natural spawn does.
+perchCase("settings_spawning", async () => {
+  type Sets = { naturalSpawning: boolean; spawnChance: number; kept: number; removed: number };
+  const sets = async (cmd = "settings") => (await ask(cmd)) as unknown as Sets;
+  try {
+    let s = await sets();
+    must(s.naturalSpawning === true && s.spawnChance === 100, `the defaults are ${s.naturalSpawning} and ${s.spawnChance}`);
+    const natural = (x: number) => {
+      const e = overworld().spawnEntity(`${NS}:zebra_finch`, at(x, 26), { spawnEvent: `${NS}:spawned_wild` });
+      spawned.push(e);
+      return e;
+    };
+    const a = natural(36);
+    await wait(2);
+    must(a.isValid, "a natural spawn went at the full chance");
+    must(a.getProperty(`${NS}:natural_spawn`) === false, "the natural-spawn mark was not cleared");
+    const k0 = (await sets()).kept;
+    must(k0 >= 1, "the spawn check never saw the natural spawn");
+    s = await sets("settings off 100");
+    must(!s.naturalSpawning, "spawning not off");
+    const b = natural(38);
+    await wait(2);
+    must(!b.isValid, "a natural spawn stayed with spawning off");
+    const egg = spawn("zebra_finch", at(40, 26));
+    overworld().runCommand(`summon ${NS}:zebra_finch 42.5 ${GROUND} 26.5`);
+    const chick = summonChick("zebra_finch", 44, 26);
+    await wait(2);
+    must(egg.isValid && chick.isValid, "a spawned bird or a chick went with spawning off");
+    const summoned = overworld().getEntities({ type: `${NS}:zebra_finch`, location: { x: 42.5, y: GROUND, z: 26.5 }, maxDistance: 1 });
+    for (const e of summoned) spawned.push(e);
+    must(summoned.length === 1, "a /summon bird went with spawning off");
+    await sets("settings on 0");
+    const c = natural(46);
+    await wait(2);
+    must(!c.isValid, "a natural spawn stayed at chance 0");
+    // Half: of 40, some stay and some go (all or none would be about 1 in a trillion).
+    await sets("settings on 50");
+    const many: Entity[] = [];
+    for (let i = 0; i < 40; i++) many.push(natural(36 + (i % 10) * 2));
+    await wait(2);
+    const stayed = many.filter((e) => e.isValid).length;
+    must(stayed > 5 && stayed < 35, `${stayed} of 40 stayed at chance 50`);
+    // A saved value out of range is clamped; the settings are kept on the world.
+    s = await sets("settings on 250");
+    must(s.spawnChance === 100, `chance 250 read back as ${s.spawnChance}`);
+  } finally {
+    await sets("settings on 100");
+  }
+});
+
+// The settings command is there (it opens the form for a player; from a script it says so).
+perchCase("settings_command", async () => {
+  let said = "";
+  try {
+    const r = overworld().runCommand(`${NS}:settings`);
+    said = `ran, success count ${r.successCount}`;
+  } catch (e) {
+    said = String(e);
+  }
+  must(!/unknown|syntax|not found/i.test(said), `the command isn't there: ${said}`);
+  // The control: a command that isn't there does throw, so the run above did find ours.
+  let control = "";
+  try {
+    overworld().runCommand(`${NS}:no_such_setting`);
+    control = "ran";
+  } catch (e) {
+    control = String(e);
+  }
+  must(control !== "ran", "a made-up command ran too, so this proves nothing");
+  log(`note settings_command: from a script it ${said}; a made-up one: ${control}`);
+});
 
 // A server restart with a bird asleep on its perch: run restart_setup, stop the server, start it
 // on the same world (bds-check.js --keep-world), run restart_check. Not in the default run.
