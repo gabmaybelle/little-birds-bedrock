@@ -1,8 +1,8 @@
 # Progress
 
-Little Birds for Bedrock, toward 0.1.0: everything in the Java edition's 0.3.0 (five birds, the
-perch as a home, the greeting, the shoulder, pairs and songs, chicks, millet spray and snacks, and
-the settings, as a form). Locked: new ideas go to a later version.
+Little Birds for Bedrock has everything in the Java edition's 0.3.0: five birds, the perch as a
+home, the greeting, the shoulder, pairs and songs, chicks, millet spray and snacks, and the
+settings, as a form. Releases are on GitHub; new features follow the Java edition's.
 
 ## Done
 
@@ -312,6 +312,9 @@ them); `src/foods.ts` and `src/settings.ts` apply them.
   are never marked, so they always work. From a console or a command block the command says to
   open it as a player, with the current values.
 
+Looked at in the game (2026-11-09, 1.26.63): the millet spray, snacks, refused foods and the
+settings all look good. Birds on a perch sit crouched, as Java's do; kept that way.
+
 Differences from Java, each because Bedrock can't do it the Java way:
 - The settings are a form, kept with the world, and apply at once (Java's are a config file read at
   start-up). A turned-down spawn is taken away just after it appears rather than never made.
@@ -366,7 +369,25 @@ Checks after session 6:
   unmarked: why the herd carries it. The same check showed that the spawn cause can't tell natural
   spawns from eggs and commands.
 
+**The release (2026-11-09).** The `.mcaddon` from a clean build: both packs at the version in
+`package.json`, their own UUIDs, the behaviour pack asking for the resource pack and for
+`@minecraft/server` 2.10.0 and `@minecraft/server-ui` 2.2.0, minimum engine 1.26.0. The scripts
+need a game with those modules stable, which is 1.26.60 or newer, and that is what the README and
+the listing say. The README now says how to install it, how to use a bird on touch controls (the
+interact button above the hotbar; tapping the bird attacks it), and what differs from the Java
+edition; it carries the Java edition's sound credits; and it and the Java edition's README point
+at each other. A `CHANGELOG.md` starts with this release.
+
+Checks on the final file: `npm test` 55 of 55; typecheck clean; `npm run validate` 51 files, no
+errors (13 known schema lags). Self-test on Bedrock Dedicated Server 1.26.63.1 and Preview
+1.26.70.23: all 56 cases and the restart check pass on each, with no error or warning lines in the
+console or the content log, and every wild flock flew on the first try. The soak: 0.44 to 0.45 ms a
+tick and 1.6 to 1.8 ms a once-a-second pass on average, worst moments 5 to 7 ms.
+
+Left for later: once, in Gabby's play, a budgie flew after her with its wings still while another
+flapped; it couldn't be made to happen again, and nothing headless can show it.
+
 ## Next
 
-1. Gabby's look in the game at the foods and the settings (local notes have the list), then the
-   release session: the `.mcaddon`, the listings and the cross-links.
+1. Listed on CurseForge as a Bedrock add-on (which also lists it on MCPEDL), then played on a phone.
+2. Whatever players find; new features follow the Java edition's.
